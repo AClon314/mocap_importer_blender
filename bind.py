@@ -4,8 +4,8 @@ bind to blender logic.
 """
 import bpy
 
-from .mapping.smplx import SMPLX_DICT, keys_middle_order
-from .lib import dump_bones, main
+from .mapping.smplx import SMPLX_DICT
+from .lib import dump_bones, keys_BFS, main
 
 
 class Mocap_PropsGroup(bpy.types.PropertyGroup):
@@ -40,7 +40,7 @@ class MOCAP_PT_Panel(bpy.types.Panel):
 class LoadMocap_Operator(bpy.types.Operator):
     bl_idname = 'object.load_mocap'
     bl_label = 'Load'
-    bl_options = {'REGISTER'}
+    bl_options = {'REGISTER', 'UNDO'}
     bl_description = 'Load Mocap. 加载动捕数据'
 
     def execute(self, context):
@@ -57,10 +57,10 @@ class GetBones_Operator(bpy.types.Operator):
     bl_description = 'Get Bones. 获取骨骼'
 
     def execute(self, context):
-        dump_bones(context.active_object)
-        tree = list(keys_middle_order(d=SMPLX_DICT))
-
+        tree = dump_bones(context.active_object)
         print(tree)
+        List = keys_BFS(tree)
+        print(List)
         return {'FINISHED'}
 
 

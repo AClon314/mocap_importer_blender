@@ -10,6 +10,7 @@ try:
     from .mapping.smplx import *
 except ImportError:
     from mapping.smplx import *
+    from mapping.smplx import SMPLX_BODY
 
 high_from_floor = 1.5
 
@@ -43,9 +44,11 @@ def Rodrigues(rotvec):
     theta = np.linalg.norm(rotvec)
     r = (rotvec / theta).reshape(3, 1) if theta > 0. else rotvec
     cost = np.cos(theta)
-    mat = np.asarray([[0, -r[2], r[1]],
-                      [r[2], 0, -r[0]],
-                      [-r[1], r[0], 0]], dtype=object)  # adicionei "",dtype=object" por que estava dando erro
+    mat = np.asarray([
+        [0, -r[2], r[1]],
+        [r[2], 0, -r[0]],
+        [-r[1], r[0], 0]],
+        dtype=object)  # adicionei "",dtype=object" por que estava dando erro
     return (cost * np.eye(3) + (1 - cost) * r.dot(r.T) + np.sin(theta) * mat)
 
 
@@ -53,8 +56,9 @@ def rodrigues_to_body_shapes(pose):
 
     rod_rots = np.asarray(pose).reshape(22, 3)
     mat_rots = [Rodrigues(rod_rot) for rod_rot in rod_rots]
-    bshapes = np.concatenate([(mat_rot - np.eye(3)).ravel()
-                              for mat_rot in mat_rots[1:]])
+    bshapes = np.concatenate([
+        (mat_rot - np.eye(3)).ravel() for mat_rot in mat_rots[1:]
+    ])
     return (mat_rots, bshapes)
 
 
@@ -105,7 +109,7 @@ def apply_trans_pose_shape(trans, body_pose, armature, frame=None):
 
     for ibone, mrot in enumerate(mrots):
         if ibone < 22:  # 因为我使用的模型没有手盖
-            bone = armature.pose.bones[part_bones['bone_%02d' % ibone]]
+            bone = armature.pose.bones[SMPLX_BODY[ibone]]
             bone.rotation_quaternion = Matrix(mrot).to_quaternion()
 
             if frame is not None:
@@ -118,22 +122,13 @@ def bone_to_dict(bone, deep=0, deep_max=1000):
     return {child.name: bone_to_dict(child, deep + 1) for child in bone.children}
 
 
-def armature_to_dict(armature):
+def dump_bones(armature):
     """将骨架转换为字典"""
     if armature and armature.type == 'ARMATURE':
         for bone in armature.pose.bones:
             if not bone.parent:
                 return {bone.name: bone_to_dict(bone)}
     return {}
-
-
-def dump_bones(armature=None):
-    """打印当前活动骨架的骨骼树状信息（JSON格式）"""
-    import json
-    if armature is None:
-        armature = bpy.context.active_object
-    armature_dict = armature_to_dict(armature)
-    print(json.dumps(armature_dict, indent=2))
 
 
 def keys_BFS(
@@ -182,12 +177,11 @@ def main(file):
     armature = bpy.context.active_object
     if armature is None or armature.type != 'ARMATURE':
         bpy.ops.scene.smplx_add_gender()    # type: ignore
-    Log.info(f'armature: {armature}')
 
     frames = len(results['smpl_params_global']['transl'])
-    Log.info(f'frames: {frames}')
     # shape = results[character]['betas'].tolist()
     for f in range(0, frames):
+        print(f'mocap_importer: {f}/{frames}\t{f/frames*100:.3f}%', end='\r')
         bpy.context.scene.frame_set(f)
         trans = results['smpl_params_global']['transl'][f]
         global_orient = results['smpl_params_global']['global_orient'][f]
@@ -196,8 +190,9 @@ def main(file):
         final_body_pose = np.vstack([global_orient, body_pose_fim])
         apply_trans_pose_shape(Vector(trans), final_body_pose, armature, f)
         bpy.context.view_layer.update()
+    Log.info(f'done')
 
 
 if __name__ == "__main__":
-    ret = keys_BFS(SMPLX_DICT)  # type: ignore
+    ret = keys_BFS(SMPLX_DICT)
     print(ret)
