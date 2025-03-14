@@ -1,0 +1,11 @@
+**/.idea/
+**/__pycache__/
+**/.pytest_cache/
+**/venv/
+**/.env
+
+*.egg-info/
+*.log
+output/
+out/
+test*.py*
