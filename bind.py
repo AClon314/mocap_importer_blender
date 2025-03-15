@@ -3,9 +3,14 @@
 bind to blender logic.
 """
 import bpy
+try:
+    from .lib import dump_bones, keys_BFS, main, _
+except ImportError as e:
+    from lib import dump_bones, keys_BFS, main, _
 
-from .mapping.smplx import SMPLX_DICT
-from .lib import dump_bones, keys_BFS, main
+
+if __name__ == '__main__':
+    print(_('Load mocap'))
 
 
 class Mocap_PropsGroup(bpy.types.PropertyGroup):
@@ -18,7 +23,7 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
 
 
 class MOCAP_PT_Panel(bpy.types.Panel):
-    bl_label = 'mocap importer'
+    bl_label = _('mocap importer')
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'SMPL-X'
@@ -32,16 +37,16 @@ class MOCAP_PT_Panel(bpy.types.Panel):
 
         row.prop(props, 'pkl_path')
         row = layout.row()
-        row.operator('object.load_mocap')
+        row.operator('object.load_mocap', icon='APPEND_BLEND')
         row = layout.row()
-        row.operator('object.get_bones')
+        row.operator('object.get_bones_info', icon='BONE_DATA')
 
 
 class LoadMocap_Operator(bpy.types.Operator):
     bl_idname = 'object.load_mocap'
-    bl_label = 'Load'
+    bl_label = _('Load mocap')
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = 'Load Mocap. 加载动捕数据'
+    bl_description = _('Load mocap data from pkl file.')
 
     def execute(self, context):
         scene = context.scene
@@ -51,10 +56,10 @@ class LoadMocap_Operator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class GetBones_Operator(bpy.types.Operator):
-    bl_idname = 'object.get_bones'
-    bl_label = 'Get Bones'
-    bl_description = 'Get Bones. 获取骨骼'
+class GetBonesInfo_Operator(bpy.types.Operator):
+    bl_idname = 'object.get_bones_info'
+    bl_label = _('print bones')
+    bl_description = _('print bones info for making mapping or debugging')
 
     def execute(self, context):
         tree = dump_bones(context.active_object)

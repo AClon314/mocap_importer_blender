@@ -1,18 +1,46 @@
 """
 https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blender.py
 """
-from typing import Generator, Union
+import os
 import bpy
 import pickle
 import numpy as np
-try:
-    from mathutils import Matrix, Vector, Quaternion, Euler
-    from .mapping.smplx import *
-except ImportError:
-    from mapping.smplx import *
-    from mapping.smplx import SMPLX_BODY
-
+DIR_SELF = os.path.dirname(__file__)
 high_from_floor = 1.5
+
+
+def get_toml(filename='blender_manifest.toml'):
+    import toml
+    with open(os.path.join(DIR_SELF, filename)) as f:
+        data = toml.load(f)
+    return data
+
+
+ID = get_toml()['id']
+
+
+def i18n():
+    """usage:
+    ```python
+    _ = i18n()
+    print(_('hello'))
+    ```"""
+    try:
+        locale = bpy.app.translations.locale
+    except AttributeError:
+        locale = os.getenv('LANG', 'zh_CN').split('.')[0]
+    import gettext
+    print(f'locale: {locale}, ID: {ID}')
+    gettext.bindtextdomain(ID, './i18n')
+    gettext.textdomain(ID)
+    # TODO not working
+    t = gettext.translation(ID, './i18n', languages=['zh_CN'])
+    t.install()
+
+    def _(msg: str, context=''):
+        return gettext.pgettext(context, msg)
+
+    return _
 
 
 def get_logger(name=__name__, level=10):
@@ -33,6 +61,12 @@ def get_logger(name=__name__, level=10):
 
 
 Log = get_logger(__name__)
+try:
+    _ = i18n()
+    from .mapping.smplx import *
+    from mathutils import Matrix, Vector, Quaternion, Euler
+except ImportError as e:
+    Log.warning(e)
 
 
 def load_pickle(file):
@@ -107,9 +141,9 @@ def apply_trans_pose_shape(trans, body_pose, armature, frame=None):
     armature.pose.bones['root'].rotation_quaternion.w = 0.0
     armature.pose.bones['root'].rotation_quaternion.x = -1.0
 
-    for ibone, mrot in enumerate(mrots):
-        if ibone < 22:  # 因为我使用的模型没有手盖
-            bone = armature.pose.bones[SMPLX_BODY[ibone]]
+    for i, mrot in enumerate(mrots):
+        if i < 22:  # 因为我使用的模型没有手盖
+            bone = armature.pose.bones[SMPLX_BODY[i]]
             bone.rotation_quaternion = Matrix(mrot).to_quaternion()
 
             if frame is not None:
@@ -181,7 +215,7 @@ def main(file):
     frames = len(results['smpl_params_global']['transl'])
     # shape = results[character]['betas'].tolist()
     for f in range(0, frames):
-        print(f'mocap_importer: {f}/{frames}\t{f/frames*100:.3f}%', end='\r')
+        print(f'{ID}: {f}/{frames}\t{f/frames*100:.3f}%', end='\r')
         bpy.context.scene.frame_set(f)
         trans = results['smpl_params_global']['transl'][f]
         global_orient = results['smpl_params_global']['global_orient'][f]
@@ -194,5 +228,9 @@ def main(file):
 
 
 if __name__ == "__main__":
-    ret = keys_BFS(SMPLX_DICT)
-    print(ret)
+    try:
+        from mapping.smplx import *
+        ret = keys_BFS(SMPLX_DICT)
+        print(ret)
+    except ImportError:
+        ...

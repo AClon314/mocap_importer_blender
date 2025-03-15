@@ -1,0 +1,120 @@
+#!/bin/env python
+import os
+import re
+import shutil
+import time
+import difflib
+import argparse
+import subprocess
+from lib import get_toml, ID
+LANGS: list[str] = ['zh_CN']
+DIR_LOCALE = 'i18n'
+POT = 'msg.pot'
+DIR_SELF = os.path.dirname(__file__).removesuffix('.')
+METAINFO = {
+    'Project-Id-Version': get_toml()['version'],
+    'PO-Revision-Date': time.strftime('%Y-%m-%d %H:%M%z'),
+    'Last-Translator': 'nolca <nolca@qq.com>',
+    # 'Language-Team': 'mocap_importer contributors <github.com/aclon314/mocap_importer>',
+}
+
+
+def path_lc(lang: str, suffix='.po') -> str:
+    folder = os.path.join(DIR_SELF, DIR_LOCALE, lang, 'LC_MESSAGES')
+    os.makedirs(folder, exist_ok=True)
+    return os.path.join(folder, ID + suffix)
+
+
+def merge_diff(old: str, new: str, rule=[r'-msgstr "', r'\+msgstr ""']):
+    with open(old, 'r') as o, open(new, 'r') as n:
+        old_lines = o.readlines()
+        new_lines = n.readlines()
+
+    diff = difflib.unified_diff(old_lines, new_lines, fromfile=old, tofile=new)
+    # diff = list(diff)
+
+    prev = ''
+    begin = end = offset = 0
+    skip = 2
+    for l in diff:
+        if skip > 0:
+            skip -= 1
+            continue
+        match = re.search(r'@@ -(\d*),(\d*) \+(\d*),(\d*) @@', l)
+        if match:
+            skip = 3    # skip no change 3 lines
+            begin_end = match.groups()
+            a_begin, a_count, b_begin, b_count = map(int, begin_end)
+            offset = min(a_begin, b_begin) + 1
+
+        if l.startswith(' ') or l.startswith('+'):
+            offset += 1
+        if re.search(rule[0], prev) and re.search(rule[1], l):
+            new_lines[offset] = prev[1:]
+
+        prev = l
+    return ''.join(new_lines)
+
+
+def pot():
+    pys = [f for f in os.listdir('.') if f.endswith('.py')]
+    subprocess.run([
+        'xgettext', '--language=Python', '--keyword=_', f'--output={POT}', *pys
+    ])
+
+
+def pot_to_po(lang):
+    PATH_NEW = PATH_OLD = path_lc(lang)
+    need_diff = False
+    if os.path.exists(PATH_OLD):
+        PATH_NEW += '.bak'
+
+    subprocess.run([
+        'msginit', f'--input={POT}', '--no-translator', '--locale', lang, '--output', PATH_NEW
+    ])
+    subprocess.run([
+        'msgconv', '--to-code=UTF-8', PATH_NEW, '-o', PATH_NEW
+    ])
+    text = ''
+    with open(PATH_NEW, 'r') as f:
+        text: str = f.read()
+    with open(PATH_NEW, 'w') as f:
+        for k, v in METAINFO.items():
+            text = re.sub(f'"({k}: ).*?"', f'"\\1 {v}"', text)
+        f.seek(0)
+        f.write(text)
+
+    if PATH_OLD != PATH_NEW:
+        text = merge_diff(PATH_OLD, PATH_NEW)
+        with open(PATH_OLD, 'w') as f:
+            f.write(text)
+        os.remove(PATH_NEW)
+
+
+def po_to_mo(lang):
+    subprocess.run([
+        'msgfmt', path_lc(lang), '--output-file',
+        path_lc(lang, '.mo')
+    ])
+
+
+def main():
+    arg = argparse.ArgumentParser()
+    arg.add_argument('-c', '--create', action='store_true', help='Create .po files. IF NOT SET, convert .po to .mo')
+    arg = arg.parse_args()
+
+    if arg.create:
+        pot()
+        for lang in LANGS:
+            pot_to_po(lang)
+        os.remove(POT)
+
+    if not arg.create:
+        for lang in LANGS:
+            po_to_mo(lang)
+
+
+if __name__ == "__main__":
+    # ret = diff('a.txt', 'b.txt')
+    # print(''.join(ret))
+    main()
