@@ -25,10 +25,15 @@ def i18n():
     _ = i18n()
     print(_('hello'))
     ```"""
+    remapping = {
+        'zh_CN': 'zh_HANS',
+        'zh_TW': 'zh_HANT',
+    }
     try:
         locale = bpy.app.translations.locale
     except AttributeError:
         locale = os.getenv('LANG', 'zh_HANS').split('.')[0]  # .UTF-8
+        locale = remapping.get(locale, locale)
         Log.warning(f'bpy.locale not found, use {locale} instead')
     Log.debug(f'locale: {locale}')
 
@@ -39,7 +44,7 @@ def i18n():
 
     # this is not working
     # translation = gettext.translation(
-    #     ID, os.path.join(DIR_SELF, DIR_I18N), [locale]
+    #     ID, DIR_I18N, [locale]
     # )
     # translation.install()
     return gettext.gettext

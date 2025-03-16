@@ -7,7 +7,7 @@ import difflib
 import argparse
 import subprocess
 from lib import get_toml, ID
-LANGS: list[str] = ['zh_CN']
+LANGS: list[str] = ['zh_HANS']
 DIR_LOCALE = 'i18n'
 POT = 'msg.pot'
 DIR_SELF = os.path.dirname(__file__).removesuffix('.')
