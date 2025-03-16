@@ -4,8 +4,11 @@ https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blende
 import os
 import bpy
 import pickle
+import gettext
 import numpy as np
+from requests import get
 DIR_SELF = os.path.dirname(__file__)
+DIR_I18N = './i18n'
 high_from_floor = 1.5
 
 
@@ -14,9 +17,6 @@ def get_toml(filename='blender_manifest.toml'):
     with open(os.path.join(DIR_SELF, filename)) as f:
         data = toml.load(f)
     return data
-
-
-ID = get_toml()['id']
 
 
 def i18n():
@@ -28,19 +28,21 @@ def i18n():
     try:
         locale = bpy.app.translations.locale
     except AttributeError:
-        locale = os.getenv('LANG', 'zh_CN').split('.')[0]
-    import gettext
-    print(f'locale: {locale}, ID: {ID}')
-    gettext.bindtextdomain(ID, './i18n')
+        locale = os.getenv('LANG', 'zh_HANS').split('.')[0]  # .UTF-8
+        Log.warning(f'bpy.locale not found, use {locale} instead')
+    Log.debug(f'locale: {locale}')
+
+    # this is working
+    os.environ['LANGUAGE'] = locale
+    gettext.bindtextdomain(ID, DIR_I18N)
     gettext.textdomain(ID)
-    # TODO not working
-    t = gettext.translation(ID, './i18n', languages=['zh_CN'])
-    t.install()
 
-    def _(msg: str, context=''):
-        return gettext.pgettext(context, msg)
-
-    return _
+    # this is not working
+    # translation = gettext.translation(
+    #     ID, os.path.join(DIR_SELF, DIR_I18N), [locale]
+    # )
+    # translation.install()
+    return gettext.gettext
 
 
 def get_logger(name=__name__, level=10):
@@ -61,8 +63,10 @@ def get_logger(name=__name__, level=10):
 
 
 Log = get_logger(__name__)
+ID = get_toml()['id']
+_ = i18n()
+
 try:
-    _ = i18n()
     from .mapping.smplx import *
     from mathutils import Matrix, Vector, Quaternion, Euler
 except ImportError as e:
@@ -225,6 +229,15 @@ def main(file):
         apply_trans_pose_shape(Vector(trans), final_body_pose, armature, f)
         bpy.context.view_layer.update()
     Log.info(f'done')
+
+
+def register():
+    global _
+    _ = i18n()
+
+
+def unregister():
+    ...
 
 
 if __name__ == "__main__":

@@ -31,7 +31,6 @@ def merge_diff(old: str, new: str, rule=[r'-msgstr "', r'\+msgstr ""']):
         new_lines = n.readlines()
 
     diff = difflib.unified_diff(old_lines, new_lines, fromfile=old, tofile=new)
-    # diff = list(diff)
 
     prev = ''
     begin = end = offset = 0
@@ -40,6 +39,7 @@ def merge_diff(old: str, new: str, rule=[r'-msgstr "', r'\+msgstr ""']):
         if skip > 0:
             skip -= 1
             continue
+        print(l, end='')
         match = re.search(r'@@ -(\d*),(\d*) \+(\d*),(\d*) @@', l)
         if match:
             skip = 3    # skip no change 3 lines
@@ -50,6 +50,7 @@ def merge_diff(old: str, new: str, rule=[r'-msgstr "', r'\+msgstr ""']):
         if l.startswith(' ') or l.startswith('+'):
             offset += 1
         if re.search(rule[0], prev) and re.search(rule[1], l):
+            print(f'\t{new_lines[offset][:-1]} -> {prev[1:]}')
             new_lines[offset] = prev[1:]
 
         prev = l
@@ -99,19 +100,13 @@ def po_to_mo(lang):
 
 
 def main():
-    arg = argparse.ArgumentParser()
-    arg.add_argument('-c', '--create', action='store_true', help='Create .po files. IF NOT SET, convert .po to .mo')
-    arg = arg.parse_args()
+    pot()
+    for lang in LANGS:
+        pot_to_po(lang)
+    os.remove(POT)
 
-    if arg.create:
-        pot()
-        for lang in LANGS:
-            pot_to_po(lang)
-        os.remove(POT)
-
-    if not arg.create:
-        for lang in LANGS:
-            po_to_mo(lang)
+    for lang in LANGS:
+        po_to_mo(lang)
 
 
 if __name__ == "__main__":
