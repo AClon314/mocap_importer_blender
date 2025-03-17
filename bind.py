@@ -20,6 +20,14 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         description='smplx/gvhmr ouput .pkl file, generated from mocap_wrapper. have dict keys: smpl_params_global, smpl_params_local',
         subtype='FILE_PATH',
     )
+    ibone: bpy.props.IntProperty(
+        name='bone index',
+        default=0,
+        description='bone index to bind',
+        min=0,
+        max=22,
+        step=1,
+    )
 
 
 class MOCAP_PT_Panel(bpy.types.Panel):
@@ -41,6 +49,9 @@ class MOCAP_PT_Panel(bpy.types.Panel):
         row = layout.row()
         row.operator('object.get_bones_info', icon='BONE_DATA')
 
+        row = layout.row()
+        row.prop(props, 'ibone')
+
 
 class LoadMocap_Operator(bpy.types.Operator):
     bl_idname = 'object.load_mocap'
@@ -52,7 +63,7 @@ class LoadMocap_Operator(bpy.types.Operator):
         scene = context.scene
         props = scene.mocap_importer
         pkl_path = props.pkl_path
-        main(pkl_path)
+        main(pkl_path, ibone=props.ibone + 1)
         return {'FINISHED'}
 
 

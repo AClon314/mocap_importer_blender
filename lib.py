@@ -2,6 +2,7 @@
 https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blender.py
 """
 import os
+from typing import Union
 import bpy
 import pickle
 import gettext
@@ -83,26 +84,78 @@ def load_pickle(file):
         return pickle.load(handle)
 
 
-def Rodrigues(rotvec):
-    theta = np.linalg.norm(rotvec)
-    r = (rotvec / theta).reshape(3, 1) if theta > 0. else rotvec
-    cost = np.cos(theta)
-    mat = np.asarray([
+def log_array(arr: Union[np.ndarray, list], name='ndarray'):
+    def recursive_convert(array):
+        if isinstance(array, np.ndarray):
+            return array.tolist()
+        elif isinstance(array, list):
+            return [recursive_convert(item) for item in array]
+        else:
+            return array
+
+    def array_to_str(array):
+        if isinstance(array, list):
+            return '\t'.join(array_to_str(item) for item in array)
+        else:
+            return str(array)
+
+    if isinstance(arr, list):
+        arr = np.array(arr)
+
+    array = recursive_convert(arr.tolist())
+    array = array_to_str(array)
+    text = f'{name}={array}'
+    Log.debug(text)
+    print()
+    return text
+
+
+def Rodrigues(rotvec: np.ndarray) -> np.ndarray:
+    """
+    Parameters
+    ----------
+    rotvec : np.ndarray
+        3D rotation vector
+
+    Returns
+    -------
+    np.ndarray
+        3x3 rotation matrix
+    """
+    # L1范数：Σ|xᵢ|
+    # L2范数（欧式距离）：√ (Σ|xᵢ|²)
+    theta = np.linalg.norm(rotvec)  # L2 norm
+    r = rotvec
+    if theta > 0.:
+        r = (rotvec / theta).reshape(3)    # 旋转向量的单位向量
+    cos = np.cos(theta)
+    sin = np.sin(theta)
+    K = np.asarray([
         [0, -r[2], r[1]],
         [r[2], 0, -r[0]],
         [-r[1], r[0], 0]],
-        dtype=object)  # adicionei "",dtype=object" por que estava dando erro
-    return (cost * np.eye(3) + (1 - cost) * r.dot(r.T) + np.sin(theta) * mat)
+        dtype=float,
+    )
+    R: np.ndarray = np.eye(3) + sin * K + (1 - cos) * K.dot(K.T)
+    return R
 
 
-def rodrigues_to_body_shapes(pose):
-
-    rod_rots = np.asarray(pose).reshape(22, 3)
+def rodrigues_to_body_shapes(pose: np.ndarray):
+    """
+    Parameters
+    ----------
+    pose : np.ndarray
+        22x3 rotation vectors
+    """
+    # rod_rots = np.asarray(pose).reshape(22, 3)
+    rod_rots = pose
     mat_rots = [Rodrigues(rod_rot) for rod_rot in rod_rots]
-    bshapes = np.concatenate([
+    body_shapes = np.concatenate([
         (mat_rot - np.eye(3)).ravel() for mat_rot in mat_rots[1:]
     ])
-    return (mat_rots, bshapes)
+    ret = (mat_rots, body_shapes)
+    log_array(body_shapes, 'body_shapes')
+    return ret
 
 
 def get_global_pose(global_pose, arm_ob, frame=None):
@@ -129,7 +182,13 @@ def get_global_pose(global_pose, arm_ob, frame=None):
     return rot_world_orig
 
 
-def apply_trans_pose_shape(trans, body_pose, armature, frame=None):
+def apply_pose(
+    trans,
+    body_pose,
+    armature: 'bpy.types.Object',
+    frame=0,
+    **kwargs
+):
     """apply trans pose and shape to character"""
 
     # transform pose into rotation matrices (for pose) and pose blendshapes
@@ -138,22 +197,24 @@ def apply_trans_pose_shape(trans, body_pose, armature, frame=None):
     #    else: #para 4d humans
     #        mrots = body_pose
     mrots, bsh = rodrigues_to_body_shapes(body_pose)
-#    mrots = body_pose
+    # mrots = body_pose
 
 #    trans = Vector((trans[0],trans[1]-2.2,trans[2]))
     trans = Vector((trans[0], trans[1] - high_from_floor, trans[2]))
 
-    # print('frame in apply pose:', frame)
-    armature.pose.bones['pelvis'].location = trans
-    armature.pose.bones['pelvis'].keyframe_insert('location', frame=frame)
+    armature.pose.bones['root'].location = trans
+    armature.pose.bones['root'].keyframe_insert('location', frame=frame)
 
     armature.pose.bones['root'].rotation_quaternion.w = 0.0
     armature.pose.bones['root'].rotation_quaternion.x = -1.0
 
-    for i, mrot in enumerate(mrots):
-        if i < 22:  # 因为我使用的模型没有手盖
-            bone = armature.pose.bones[SMPLX_BODY[i]]
-            bone.rotation_quaternion = Matrix(mrot).to_quaternion()
+    for i, rot in enumerate(mrots):
+        # if i < 22:  # 因为我使用的模型没有手盖
+        if i < kwargs.get('ibone', 22):
+            # if i == i_bone:
+            bone = armature.pose.bones[BODY[i]]
+            log_array(rot, f'{i}_{BODY[i]}')
+            bone.rotation_quaternion = Matrix(rot).to_quaternion()
 
             if frame is not None:
                 bone.keyframe_insert('rotation_quaternion', frame=frame)
@@ -214,24 +275,30 @@ def keys_BFS(
     return ret
 
 
-def main(file):
+def main(file, **kwargs):
     results = load_pickle(file)
 
     armature = bpy.context.active_object
     if armature is None or armature.type != 'ARMATURE':
         bpy.ops.scene.smplx_add_gender()    # type: ignore
+        for obj in bpy.data.objects:
+            if obj.name.startswith('SMPLX-'):
+                armature = obj
+                break
+    if armature is None:
+        raise ValueError('No armature found')
 
     frames = len(results['smpl_params_global']['transl'])
     # shape = results[character]['betas'].tolist()
-    for f in range(0, frames):
+    for f in range(0, frames // 4):
         print(f'{ID}: {f}/{frames}\t{f/frames*100:.3f}%', end='\r')
         bpy.context.scene.frame_set(f)
-        trans = results['smpl_params_global']['transl'][f]
-        global_orient = results['smpl_params_global']['global_orient'][f]
-        body_pose = results['smpl_params_global']['body_pose'][f]
-        body_pose_fim = body_pose.reshape(int(len(body_pose) / 3), 3)
-        final_body_pose = np.vstack([global_orient, body_pose_fim])
-        apply_trans_pose_shape(Vector(trans), final_body_pose, armature, f)
+        global_trans = results['smpl_params_global']['transl'][f]
+        global_orient: np.ndarray = results['smpl_params_global']['global_orient'][f]
+        body_pose: np.ndarray = results['smpl_params_global']['body_pose'][f]
+        body_pose = body_pose.reshape(int(len(body_pose) / 3), 3)   # (21,3)
+        body_pose = np.vstack([global_orient, body_pose])  # (22,3)
+        apply_pose(global_trans, body_pose, armature, f, **kwargs)
         bpy.context.view_layer.update()
     Log.info(f'done')
 
@@ -248,7 +315,7 @@ def unregister():
 if __name__ == "__main__":
     try:
         from mapping.smplx import *
-        ret = keys_BFS(SMPLX_DICT)
+        ret = keys_BFS(BONES)
         print(ret)
     except ImportError:
         ...

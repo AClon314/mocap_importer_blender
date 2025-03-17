@@ -1,5 +1,4 @@
-# Chinese translations for PACKAGE package
-# PACKAGE 软件包的简体中文翻译.
+# Chinese translations for PACKAGE package.
 # Copyright (C) 2025 THE PACKAGE'S COPYRIGHT HOLDER
 # This file is distributed under the same license as the PACKAGE package.
 # Automatically generated, 2025.
@@ -8,31 +7,31 @@ msgid ""
 msgstr ""
 "Project-Id-Version:  0.1.0"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-03-16 09:56+0800\n"
-"PO-Revision-Date:  2025-03-16 09:56+0800"
+"POT-Creation-Date: 2025-03-16 12:34+0800\n"
+"PO-Revision-Date:  2025-03-16 12:34+0800"
 "Last-Translator:  nolca <nolca@qq.com>"
 "Language-Team: none\n"
-"Language: zh_CN\n"
+"Language: zh_HANS\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: bind.py:13 bind.py:47
+#: bind.py:13 bind.py:58
 msgid "Load mocap"
 msgstr "加载动捕"
 
-#: bind.py:26 lib.py:41
+#: bind.py:34
 msgid "mocap importer"
 msgstr "动捕导入"
 
-#: bind.py:49
+#: bind.py:60
 msgid "Load mocap data from pkl file."
 msgstr "从 pkl 文件加载动捕数据。"
 
-#: bind.py:61
+#: bind.py:72
 msgid "print bones"
 msgstr "打印骨骼"
 
-#: bind.py:62
+#: bind.py:73
 msgid "print bones info for making mapping or debugging"
 msgstr "打印骨骼信息，用于制作映射或调试"

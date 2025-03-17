@@ -1,10 +1,8 @@
 #!/bin/env python
 import os
 import re
-import shutil
 import time
 import difflib
-import argparse
 import subprocess
 from lib import get_toml, ID
 LANGS: list[str] = ['zh_HANS']
@@ -110,6 +108,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # ret = diff('a.txt', 'b.txt')
-    # print(''.join(ret))
     main()

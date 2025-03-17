@@ -1,11 +1,11 @@
+"""generate from `get bones info` operator"""
 from typing import Literal, get_args
 
 
 ...
 ...
-...
 
-TYPE_BONES_BODY = Literal[
+TYPE_BODY = Literal[
     'root',
     'pelvis',
     'left_hip',
@@ -24,13 +24,16 @@ TYPE_BONES_BODY = Literal[
     'right_collar',
     'head',
     'left_shoulder',
-    'right_shoulder',  # 'jaw', 'left_eye_smplhf', 'right_eye_smplhf',
+    'right_shoulder',  # head
     'left_elbow',
     'right_elbow',
     'left_wrist',
     'right_wrist',
+    # 'left_hand',
+    # 'right_hand',
 ]
-TYPE_BONES_HANDS = Literal[
+TYPE_HEAD = Literal['jaw', 'left_eye_smplhf', 'right_eye_smplhf']
+TYPE_HANDS = Literal[
     'left_index1', 'left_middle1', 'left_pinky1', 'left_ring1', 'left_thumb1',
     'right_index1', 'right_middle1', 'right_pinky1', 'right_ring1', 'right_thumb1',
     'left_index2', 'left_middle2', 'left_pinky2', 'left_ring2', 'left_thumb2',
@@ -39,10 +42,11 @@ TYPE_BONES_HANDS = Literal[
     'right_index3', 'right_middle3', 'right_pinky3', 'right_ring3', 'right_thumb3',
 ]
 
-SMPLX_BODY = get_args(TYPE_BONES_BODY)
-SMPLX_HANDS = get_args(TYPE_BONES_HANDS)
+BODY = get_args(TYPE_BODY)
+HANDS = get_args(TYPE_HANDS)
+HEAD = get_args(TYPE_HEAD)
 
-SMPLX_DICT = {
+BONES = {
     "root": {
         "pelvis": {
             "left_hip": {
