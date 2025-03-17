@@ -2,14 +2,14 @@
 https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blender.py
 """
 import os
-from typing import Union
+from typing import Union, Literal
 import bpy
 import pickle
 import gettext
 import numpy as np
-from requests import get
 DIR_SELF = os.path.dirname(__file__)
 DIR_I18N = './i18n'
+TYPE_MAPPING = Literal['smpl', 'smplx']
 high_from_floor = 1.5
 
 
@@ -73,7 +73,6 @@ ID = get_toml()['id']
 _ = i18n()
 
 try:
-    from .mapping.smplx import *
     from mathutils import Matrix, Vector, Quaternion, Euler
 except ImportError as e:
     Log.warning(e)
@@ -125,17 +124,18 @@ def Rodrigues(rotvec: np.ndarray) -> np.ndarray:
     # L1范数：Σ|xᵢ|
     # L2范数（欧式距离）：√ (Σ|xᵢ|²)
     theta = np.linalg.norm(rotvec)  # L2 norm
-    r = rotvec
+    k = rotvec
     if theta > 0.:
-        r = (rotvec / theta).reshape(3)    # 旋转向量的单位向量
+        k = (rotvec / theta).reshape(3)    # 旋转向量的单位向量
     cos = np.cos(theta)
     sin = np.sin(theta)
     K = np.asarray([
-        [0, -r[2], r[1]],
-        [r[2], 0, -r[0]],
-        [-r[1], r[0], 0]],
+        [0, -k[2], k[1]],
+        [k[2], 0, -k[0]],
+        [-k[1], k[0], 0]],
         dtype=float,
     )
+    # R: np.ndarray = cos * np.eye(3) + sin * K + (1 - cos) * k.dot(k.T)
     R: np.ndarray = np.eye(3) + sin * K + (1 - cos) * K.dot(K.T)
     return R
 
@@ -147,34 +147,33 @@ def rodrigues_to_body_shapes(pose: np.ndarray):
     pose : np.ndarray
         22x3 rotation vectors
     """
-    # rod_rots = np.asarray(pose).reshape(22, 3)
-    rod_rots = pose
-    mat_rots = [Rodrigues(rod_rot) for rod_rot in rod_rots]
+    pose = np.asarray(pose).reshape(22, 3)
+    rot_matrix = [Rodrigues(rot) for rot in pose]
     body_shapes = np.concatenate([
-        (mat_rot - np.eye(3)).ravel() for mat_rot in mat_rots[1:]
+        (mat_rot - np.eye(3)).ravel() for mat_rot in rot_matrix[1:]
     ])
-    ret = (mat_rots, body_shapes)
-    log_array(body_shapes, 'body_shapes')
+    ret = (rot_matrix, body_shapes)
+    log_array(rot_matrix, 'body_shapes')
     return ret
 
 
-def get_global_pose(global_pose, arm_ob, frame=None):
+def get_global_pose(global_pose, armature, frame=None):
 
-    arm_ob.pose.bones['m_avg_root'].rotation_quaternion.w = 0.0
-    arm_ob.pose.bones['m_avg_root'].rotation_quaternion.x = -1.0
+    armature.pose.bones[BODY[0]].rotation_quaternion.w = 0.0
+    armature.pose.bones[BODY[0]].rotation_quaternion.x = -1.0
 
-    bone = arm_ob.pose.bones['m_avg_Pelvis']
+    bone = armature.pose.bones[BODY[1]]
     # if frame is not None:
     #     bone.keyframe_insert('rotation_quaternion', frame=frame)
 
-    root_orig = arm_ob.pose.bones['m_avg_root'].rotation_quaternion
-    mw_orig = arm_ob.matrix_world.to_quaternion()
+    root_orig = armature.pose.bones[BODY[0]].rotation_quaternion
+    mw_orig = armature.matrix_world.to_quaternion()
     pelvis_quat = Matrix(global_pose[0]).to_quaternion()
 
     bone.rotation_quaternion = pelvis_quat
     bone.keyframe_insert('rotation_quaternion', frame=frame)
 
-    pelvis_applyied = arm_ob.pose.bones['m_avg_Pelvis'].rotation_quaternion
+    pelvis_applyied = armature.pose.bones[BODY[1]].rotation_quaternion
     bpy.context.view_layer.update()
 
     rot_world_orig = root_orig @ pelvis_applyied @ mw_orig  # pegar a rotacao em relacao ao mundo
@@ -199,14 +198,13 @@ def apply_pose(
     mrots, bsh = rodrigues_to_body_shapes(body_pose)
     # mrots = body_pose
 
-#    trans = Vector((trans[0],trans[1]-2.2,trans[2]))
     trans = Vector((trans[0], trans[1] - high_from_floor, trans[2]))
 
-    armature.pose.bones['root'].location = trans
-    armature.pose.bones['root'].keyframe_insert('location', frame=frame)
+    armature.pose.bones[BODY[1]].location = trans
+    armature.pose.bones[BODY[1]].keyframe_insert('location', frame=frame)
 
-    armature.pose.bones['root'].rotation_quaternion.w = 0.0
-    armature.pose.bones['root'].rotation_quaternion.x = -1.0
+    armature.pose.bones[BODY[0]].rotation_quaternion.w = 0.0
+    armature.pose.bones[BODY[0]].rotation_quaternion.x = -1.0
 
     for i, rot in enumerate(mrots):
         # if i < 22:  # 因为我使用的模型没有手盖
@@ -275,16 +273,43 @@ def keys_BFS(
     return ret
 
 
+def guess_obj_mapping(obj: 'bpy.types.Object') -> Union[TYPE_MAPPING, None]:
+    mapping: Union[TYPE_MAPPING, None] = None
+    if obj.name.startswith('SMPLX-'):
+        mapping = 'smplx'
+    elif obj.name.startswith('basicModel_'):
+        mapping = 'smpl'
+    bpy.context.view_layer.objects.active = obj
+    return mapping
+
+
+def dynamic_import(mapping: Union[TYPE_MAPPING, None] = None):
+    global BODY
+    if mapping is None:
+        active = bpy.context.active_object
+        if active:
+            mapping = guess_obj_mapping(active)
+        else:
+            for obj in bpy.data.objects:
+                mapping = guess_obj_mapping(obj)
+                if mapping:
+                    break
+    if mapping == 'smpl':
+        from .mapping.smpl import BODY
+    elif mapping == 'smplx':
+        from .mapping.smplx import BODY
+    else:
+        raise ValueError(f'Unknown mapping: {mapping}')
+    return BODY
+
+
 def main(file, **kwargs):
     results = load_pickle(file)
 
     armature = bpy.context.active_object
     if armature is None or armature.type != 'ARMATURE':
         bpy.ops.scene.smplx_add_gender()    # type: ignore
-        for obj in bpy.data.objects:
-            if obj.name.startswith('SMPLX-'):
-                armature = obj
-                break
+    dynamic_import(kwargs.get('mapping', None))
     if armature is None:
         raise ValueError('No armature found')
 
@@ -300,6 +325,23 @@ def main(file, **kwargs):
         body_pose = np.vstack([global_orient, body_pose])  # (22,3)
         apply_pose(global_trans, body_pose, armature, f, **kwargs)
         bpy.context.view_layer.update()
+
+    armature.pose.bones[BODY[0]].rotation_quaternion.w = 1.0
+    armature.pose.bones[BODY[0]].rotation_quaternion.x = 0.0
+    armature.pose.bones[BODY[0]].rotation_quaternion.y = 0.0
+    armature.pose.bones[BODY[0]].rotation_quaternion.z = 0.0
+
+    armature.pose.bones[BODY[1]].constraints.new('COPY_LOCATION')
+    # armature.pose.bones[BODY[1]].constraints["Copy Location"].target = armature_ref
+    armature.pose.bones[BODY[1]].constraints[0].target = armature
+    armature.pose.bones[BODY[1]].constraints[0].subtarget = BODY[1]
+    # armature.pose.bones[BODY[1]].constraints["Copy Location"].subtarget = BODY[1]
+
+    armature.pose.bones[BODY[1]].constraints.new('COPY_ROTATION')
+    # armature.pose.bones[BODY[1]].constraints["Copy Rotation"].target = armature_ref
+    armature.pose.bones[BODY[1]].constraints[1].target = armature
+    # armature.pose.bones[BODY[1]].constraints["Copy Rotation"].subtarget = BODY[1]
+    armature.pose.bones[BODY[1]].constraints[1].subtarget = BODY[1]
     Log.info(f'done')
 
 
@@ -313,6 +355,7 @@ def unregister():
 
 
 if __name__ == "__main__":
+    # debug
     try:
         from mapping.smplx import *
         ret = keys_BFS(BONES)

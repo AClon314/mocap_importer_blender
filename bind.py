@@ -20,10 +20,20 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         description='smplx/gvhmr ouput .pkl file, generated from mocap_wrapper. have dict keys: smpl_params_global, smpl_params_local',
         subtype='FILE_PATH',
     )
+    map_type: bpy.props.EnumProperty(
+        name='Armature',
+        items=[
+            ('Auto detect', 'Auto detect', _('auto detect armature type, based on name (will enhanced in later version)')),
+            ('smpl', 'SMPL', _('original smpl bones struct')),
+            ('smplx', 'SMPL-X', _('update version of smpl. With more 3 head bones and 2*5*3 hands bones')),
+        ],
+        default='Auto detect',
+        description=_('bones struct mapping type'),
+    )
     ibone: bpy.props.IntProperty(
-        name='bone index',
-        default=0,
-        description='bone index to bind',
+        name=_('bone index'),
+        default=22,
+        description=_('bone index to bind, for debug'),
         min=0,
         max=22,
         step=1,
@@ -45,6 +55,8 @@ class MOCAP_PT_Panel(bpy.types.Panel):
 
         row.prop(props, 'pkl_path')
         row = layout.row()
+        row.prop(props, 'map_type')
+        row = layout.row()
         row.operator('object.load_mocap', icon='APPEND_BLEND')
         row = layout.row()
         row.operator('object.get_bones_info', icon='BONE_DATA')
@@ -63,7 +75,8 @@ class LoadMocap_Operator(bpy.types.Operator):
         scene = context.scene
         props = scene.mocap_importer
         pkl_path = props.pkl_path
-        main(pkl_path, ibone=props.ibone + 1)
+        map_type = None if props.map_type == 'Auto detect' else props.map_type
+        main(pkl_path, mapping=map_type, ibone=props.ibone + 1)
         return {'FINISHED'}
 
 
@@ -74,9 +87,9 @@ class GetBonesInfo_Operator(bpy.types.Operator):
 
     def execute(self, context):
         tree = dump_bones(context.active_object)
-        print(tree)
+        print('BONES', tree)
         List = keys_BFS(tree)
-        print(List)
+        print('TYPE_BODY = Literal', List)
         return {'FINISHED'}
 
 
