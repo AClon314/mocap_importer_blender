@@ -1,4 +1,4 @@
-"""generate from `get bones info` operator"""
+"""smpl bones struct with 24 body bones"""
 from .smplx import TYPE_BONES as T_BONES, BONES as X_BONES, BODY as X_BODY
 from typing import Literal, Dict, get_args
 ...
@@ -55,4 +55,10 @@ BONES_TREE = {
                                     'm_avg_Spine1': {'m_avg_Spine2': {'m_avg_Spine3': {'m_avg_Neck': {'m_avg_Head': {}},
                                                                                        'm_avg_L_Collar': {'m_avg_L_Shoulder': {'m_avg_L_Elbow': {'m_avg_L_Wrist': {'m_avg_L_Hand': {}}}}},
                                                                                        'm_avg_R_Collar': {'m_avg_R_Shoulder': {'m_avg_R_Elbow': {'m_avg_R_Wrist': {'m_avg_R_Hand': {}}}}}}}}}}
+}
+
+from ..lib import TYPE_I18N
+HELP: Dict[TYPE_I18N, str | None] = {
+    'en_US': __doc__,
+    'zh_HANS': """有24根骨骼的SMPL骨骼结构""",
 }

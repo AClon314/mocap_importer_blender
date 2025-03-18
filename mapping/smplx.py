@@ -1,4 +1,4 @@
-"""generate from `get bones info` operator"""
+"""update version of smpl. With more 3 head bones and 2*5*3=30 hands bones"""
 from typing import Dict, Literal, get_args
 ...
 ...
@@ -66,4 +66,10 @@ BONES_TREE = {
                                                                                                                              'right_pinky1': {'right_pinky2': {'right_pinky3': {}}},
                                                                                                                              'right_ring1': {'right_ring2': {'right_ring3': {}}},
                                                                                                                              'right_thumb1': {'right_thumb2': {'right_thumb3': {}}}}}}}}}}}}
+}
+
+from .. import lib
+HELP: Dict[lib.TYPE_I18N, str | None] = {
+    'en_US': __doc__,
+    'zh_HANS': """SMPL 的更新版本。增加了 3 块头骨和 2*5*3=30 块手骨""",
 }

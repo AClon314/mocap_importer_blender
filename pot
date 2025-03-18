@@ -4,7 +4,7 @@ import re
 import time
 import difflib
 import subprocess
-from lib import get_toml, ID
+from lib import ID
 LANGS: list[str] = ['zh_HANS']
 DIR_LOCALE = 'i18n'
 POT = 'msg.pot'
@@ -15,6 +15,13 @@ METAINFO = {
     'Last-Translator': 'nolca <nolca@qq.com>',
     # 'Language-Team': 'mocap_importer contributors <github.com/aclon314/mocap_importer>',
 }
+
+
+def get_toml(filename='blender_manifest.toml'):
+    import toml
+    with open(os.path.join(DIR_SELF, filename)) as f:
+        data = toml.load(f)
+    return data
 
 
 def path_lc(lang: str, suffix='.po') -> str:
