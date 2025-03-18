@@ -1,5 +1,5 @@
 """generate from `get bones info` operator"""
-from .smplx import TYPE_BONES as T_BONES, BONES as X_BONES
+from .smplx import TYPE_BONES as T_BONES, BONES as X_BONES, BODY as X_BODY
 from typing import Literal, Dict, get_args
 ...
 ...
@@ -47,7 +47,7 @@ BODY = get_args(TYPE_BODY)
 # BONES = BODY + HEAD + HANDS
 BONES = BODY
 
-MAP: Dict[T_BONES, TYPE_BONES] = {k: v for k, v in zip(X_BONES, BODY)}
+MAP: Dict[T_BONES, TYPE_BONES] = {k: v for k, v in zip(X_BODY, BODY)}
 
 BONES_TREE = {
     'm_avg_root': {'m_avg_Pelvis': {'m_avg_L_Hip': {'m_avg_L_Knee': {'m_avg_L_Ankle': {'m_avg_L_Foot': {}}}},

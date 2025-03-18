@@ -29,8 +29,8 @@ TYPE_BODY = Literal[
     'right_elbow',
     'left_wrist',
     'right_wrist',
-    # 'left_hand',
-    # 'right_hand',
+    'left_hand',    # unsed in gvhmr
+    'right_hand',
 ]
 TYPE_HEAD = Literal['jaw', 'left_eye_smplhf', 'right_eye_smplhf']
 TYPE_HANDS = Literal[

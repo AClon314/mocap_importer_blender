@@ -126,17 +126,17 @@ def Rodrigues(rotvec: np.ndarray) -> np.ndarray:
     theta = np.linalg.norm(rotvec)  # L2 norm
     k = rotvec
     if theta > 0.:
-        k = (rotvec / theta).reshape(3)    # 旋转向量的单位向量
+        k = (rotvec / theta).reshape(3, 1)    # 旋转向量的单位向量, TODO why (3,1) instead 3 ?
     cos = np.cos(theta)
     sin = np.sin(theta)
     K = np.asarray([
         [0, -k[2], k[1]],
         [k[2], 0, -k[0]],
         [-k[1], k[0], 0]],
-        dtype=float,
+        dtype=object,
     )
-    # R: np.ndarray = cos * np.eye(3) + sin * K + (1 - cos) * k.dot(k.T)
-    R: np.ndarray = np.eye(3) + sin * K + (1 - cos) * K.dot(K.T)
+    R: np.ndarray = cos * np.eye(3) + sin * K + (1 - cos) * k.dot(k.T)
+    # R: np.ndarray = np.eye(3) + sin * K + (1 - cos) * K.dot(K.T)
     return R
 
 
@@ -148,12 +148,12 @@ def rodrigues_to_body_shapes(pose: np.ndarray):
         22x3 rotation vectors
     """
     pose = np.asarray(pose).reshape(22, 3)
-    rot_matrix = [Rodrigues(rot) for rot in pose]
+    rot_matrixs = [Rodrigues(rot) for rot in pose]
     body_shapes = np.concatenate([
-        (mat_rot - np.eye(3)).ravel() for mat_rot in rot_matrix[1:]
+        (rotM - np.eye(3)).ravel() for rotM in rot_matrixs[1:]
     ])
-    ret = (rot_matrix, body_shapes)
-    log_array(rot_matrix, 'body_shapes')
+    ret = (rot_matrixs, body_shapes)
+    log_array(rot_matrixs, 'body_shapes')
     return ret
 
 
@@ -206,7 +206,7 @@ def apply_pose(
     armature.pose.bones[BODY[0]].rotation_quaternion.w = 0.0
     armature.pose.bones[BODY[0]].rotation_quaternion.x = -1.0
 
-    for i, rot in enumerate(mrots):
+    for i, rot in enumerate(mrots, start=1):    # skip root!
         # if i < 22:  # 因为我使用的模型没有手盖
         if i < kwargs.get('ibone', 22):
             # if i == i_bone:
@@ -310,12 +310,13 @@ def main(file, **kwargs):
     if armature is None or armature.type != 'ARMATURE':
         bpy.ops.scene.smplx_add_gender()    # type: ignore
     dynamic_import(kwargs.get('mapping', None))
+    armature = bpy.context.active_object
     if armature is None:
         raise ValueError('No armature found')
 
     frames = len(results['smpl_params_global']['transl'])
     # shape = results[character]['betas'].tolist()
-    for f in range(0, frames // 4):
+    for f in range(0, frames):
         print(f'{ID}: {f}/{frames}\t{f/frames*100:.3f}%', end='\r')
         bpy.context.scene.frame_set(f)
         global_trans = results['smpl_params_global']['transl'][f]
@@ -326,22 +327,6 @@ def main(file, **kwargs):
         apply_pose(global_trans, body_pose, armature, f, **kwargs)
         bpy.context.view_layer.update()
 
-    armature.pose.bones[BODY[0]].rotation_quaternion.w = 1.0
-    armature.pose.bones[BODY[0]].rotation_quaternion.x = 0.0
-    armature.pose.bones[BODY[0]].rotation_quaternion.y = 0.0
-    armature.pose.bones[BODY[0]].rotation_quaternion.z = 0.0
-
-    armature.pose.bones[BODY[1]].constraints.new('COPY_LOCATION')
-    # armature.pose.bones[BODY[1]].constraints["Copy Location"].target = armature_ref
-    armature.pose.bones[BODY[1]].constraints[0].target = armature
-    armature.pose.bones[BODY[1]].constraints[0].subtarget = BODY[1]
-    # armature.pose.bones[BODY[1]].constraints["Copy Location"].subtarget = BODY[1]
-
-    armature.pose.bones[BODY[1]].constraints.new('COPY_ROTATION')
-    # armature.pose.bones[BODY[1]].constraints["Copy Rotation"].target = armature_ref
-    armature.pose.bones[BODY[1]].constraints[1].target = armature
-    # armature.pose.bones[BODY[1]].constraints["Copy Rotation"].subtarget = BODY[1]
-    armature.pose.bones[BODY[1]].constraints[1].subtarget = BODY[1]
     Log.info(f'done')
 
 
