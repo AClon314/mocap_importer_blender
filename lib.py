@@ -343,7 +343,7 @@ if __name__ == "__main__":
     # debug
     try:
         from mapping.smplx import *
-        ret = keys_BFS(BONES)
+        ret = keys_BFS(BONES_TREE)
         print(ret)
     except ImportError:
         ...
