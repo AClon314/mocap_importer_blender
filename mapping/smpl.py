@@ -48,7 +48,7 @@ BODY = get_args(TYPE_BODY)
 BONES = BODY
 
 MAP: Dict[T_BONES, TYPE_BONES] = {k: v for k, v in zip(X_BODY, BODY)}
-
+MAP_R = {v: k for k, v in MAP.items()}
 BONES_TREE = {
     'm_avg_root': {'m_avg_Pelvis': {'m_avg_L_Hip': {'m_avg_L_Knee': {'m_avg_L_Ankle': {'m_avg_L_Foot': {}}}},
                                     'm_avg_R_Hip': {'m_avg_R_Knee': {'m_avg_R_Ankle': {'m_avg_R_Foot': {}}}},

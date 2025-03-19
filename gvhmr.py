@@ -1,4 +1,5 @@
 from .lib import *
+Log = get_logger(__name__)
 
 
 def Rodrigues(rotvec: np.ndarray) -> np.ndarray:
@@ -45,7 +46,7 @@ def rodrigues_to_body_shapes(pose: np.ndarray):
         (rotM - np.eye(3)).ravel() for rotM in rot_matrixs[1:]
     ])
     ret = (rot_matrixs, body_shapes)
-    log_array(rot_matrixs, 'body_shapes')
+    # log_array(rot_matrixs, 'body_shapes')
     return ret
 
 
@@ -81,6 +82,7 @@ def apply_pose(
     **kwargs
 ):
     """apply trans pose and shape to character"""
+
     mrots, bsh = rodrigues_to_body_shapes(body_pose)
     # mrots = body_pose
 
@@ -94,9 +96,8 @@ def apply_pose(
 
     for i, rot in enumerate(mrots, start=1):    # skip root!
         if i < kwargs.get('ibone', 22):
-            # if i == i_bone:
             bone = armature.pose.bones[BODY[i]]
-            log_array(rot, f'{i}_{BODY[i]}')
+            # log_array(rot, f'{i}_{BODY[i]}')
             bone.rotation_quaternion = Matrix(rot).to_quaternion()  # type: ignore
 
             if frame is not None:
@@ -113,13 +114,17 @@ def per_frame(From_data, to_armature, at_frame, **kwargs):
     Log.info(f'done')
 
 
-def gvhmr(file, **kwargs):
+def gvhmr(file, mapping=None, **kwargs):
     data = load_pickle(file)
 
     armature = bpy.context.active_object
     if armature is None or armature.type != 'ARMATURE':
         bpy.ops.scene.smplx_add_gender()    # type: ignore
-    dynamic_import(kwargs.get('mapping', None))
+    mapping = None if mapping and mapping.lower() == 'auto' else mapping
+    mapping = get_mapping_from_selected_or_objs(mapping)
+    global BODY
+    BODY = MODS[mapping].BODY
+
     armature = bpy.context.active_object
     if armature is None:
         raise ValueError('No armature found')

@@ -16,6 +16,7 @@ BONES = BODY + HEAD + HANDS
 
 from .smplx import TYPE_BONES as T_BONES
 MAP: Dict[T_BONES, TYPE_BODY] = {}   # type: ignore
+MAP_R = {v: k for k, v in MAP.items()}
 BONES_TREE = {}
 from ..lib import TYPE_I18N
 HELP: Dict[TYPE_I18N, str | None] = {

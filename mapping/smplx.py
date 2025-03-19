@@ -49,7 +49,7 @@ HANDS = get_args(TYPE_HANDS)
 BONES = BODY + HEAD + HANDS
 
 MAP: Dict[TYPE_BONES, TYPE_BONES] = {k: k for k in BODY}
-
+MAP_R = {v: k for k, v in MAP.items()}
 BONES_TREE = {
     'root': {'pelvis': {'left_hip': {'left_knee': {'left_ankle': {'left_foot': {}}}},
                         'right_hip': {'right_knee': {'right_ankle': {'right_foot': {}}}},

@@ -2,11 +2,11 @@
 https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blender.py
 """
 import os
-from types import ModuleType
 import bpy
 import pickle
 import importlib
 import numpy as np
+from types import ModuleType
 from typing import List, Union, Literal
 DIR_SELF = os.path.dirname(__file__)
 DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
@@ -34,10 +34,16 @@ def import_mapping():
 
 def mapping_items():
     items: List[tuple[str, str, str]] = [(
-        'Auto', 'Auto',
+        'auto', 'Auto',
         'Auto detect armature type, based on name (will enhanced in later version)')]
     for k, m in MODS.items():
-        items.append((k, k, m.HELP.get(bpy.app.translations.locale, f'Error: No HELP for {k}')))
+        help = ''
+        try:
+            help = m.HELP[bpy.app.translations.locale]
+        except Exception:
+            Log.warning(f'No help for {k}')
+            help = m.__doc__ if m.__doc__ else ''
+        items.append((k, k, help))
     return items
 
 
@@ -50,9 +56,23 @@ def get_logger(name=__name__, level=10):
     Log.setLevel(level)
     Log.propagate = False   # disable propagate to root logger
     stream_handler = logging.StreamHandler()
+
+    # 添加日志级别前缀
+    level_prefix = {
+        logging.DEBUG: '🐛 DEBUG',
+        logging.INFO: '💬 INFO',
+        logging.WARNING: '⚠️ WARNING',
+        logging.ERROR: '❌ ERROR',
+    }
+
+    class CustomFormatter(logging.Formatter):
+        def format(self, record):
+            record.levelname = level_prefix.get(record.levelno, record.levelname)
+            return super().format(record)
+
     stream_handler.setFormatter(
-        logging.Formatter(
-            '%(levelname)s\t%(asctime)s  💬 %(message)s\t%(name)s:%(lineno)d',
+        CustomFormatter(
+            '%(levelname)s\t%(asctime)s  %(message)s\t%(name)s:%(lineno)d',
             datefmt='%H:%M:%S'))
     Log.addHandler(stream_handler)
     return Log
@@ -100,14 +120,13 @@ def log_array(arr: Union[np.ndarray, list], name='ndarray'):
     return text
 
 
-def bone_to_dict(bone, deep=0, deep_max=1000):
-    if deep_max and deep > deep_max:
-        raise ValueError(f'Bones tree too deep, {deep} > {deep_max}')
-    return {child.name: bone_to_dict(child, deep + 1) for child in bone.children}
-
-
 def dump_bones(armature):
     """将骨架转换为字典"""
+    def bone_to_dict(bone, deep=0, deep_max=1000):
+        if deep_max and deep > deep_max:
+            raise ValueError(f'Bones tree too deep, {deep} > {deep_max}')
+        return {child.name: bone_to_dict(child, deep + 1) for child in bone.children}
+
     if armature and armature.type == 'ARMATURE':
         for bone in armature.pose.bones:
             if not bone.parent:
@@ -155,18 +174,42 @@ def keys_BFS(
     return ret
 
 
-def guess_obj_mapping(obj: 'bpy.types.Object') -> Union[TYPE_MAPPING, None]:
-    mapping: Union[TYPE_MAPPING, None] = None
-    if obj.name.startswith('SMPLX-'):
-        mapping = 'smplx'
-    elif obj.name.startswith('Armature'):
-        mapping = 'smpl'
-    bpy.context.view_layer.objects.active = obj
-    return mapping
+def get_similar(list1, list2):
+    """
+    calc jaccard similarity of two lists
+    Returns:
+        float: ∈[0, 1]
+    """
+    set1, set2 = set(list1), set(list2)
+    intersection = len(set1 & set2)
+    union = len(set1 | set2)
+    ret = intersection / union if union != 0 else 0
+    return ret
 
 
-def dynamic_import(mapping: Union[TYPE_MAPPING, None] = None):
-    global BODY
+def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> Union[TYPE_MAPPING, None]:
+    if obj.type != 'ARMATURE':
+        return None
+    bones = dump_bones(obj)
+    keys = keys_BFS(bones)
+    mapping = None
+    max_similar = 0
+    for map, mod in MODS.items():
+        similar = get_similar(keys, mod.BONES)
+        if similar > max_similar:
+            max_similar = similar
+            mapping = map
+    if mapping and select:
+        bpy.context.view_layer.objects.active = obj
+    Log.info(f'Guess mapping: {mapping} with {max_similar:.2f}')
+    return mapping  # type: ignore
+
+
+def get_mapping_from_selected_or_objs(mapping: Union[TYPE_MAPPING, None] = None):
+    """
+    import mapping module by name  
+    will set global variable BODY(temporary)
+    """
     if mapping is None:
         # guess mapping
         active = bpy.context.active_object
@@ -174,20 +217,16 @@ def dynamic_import(mapping: Union[TYPE_MAPPING, None] = None):
             mapping = guess_obj_mapping(active)
         else:
             for obj in bpy.data.objects:
-                mapping = guess_obj_mapping(obj)
-                if mapping:
-                    break
-
-    if mapping == 'smpl':
-        from .mapping.smpl import BODY
-    elif mapping == 'smplx':
-        from .mapping.smplx import BODY
-    else:
-        raise ValueError(f'Unknown mapping: {mapping}')
-    return BODY
+                if obj.type == 'ARMATURE':
+                    mapping = guess_obj_mapping(obj)
+                    if mapping:
+                        break
+            raise ValueError(f'Unknown mapping: {mapping}')
+    return mapping
 
 
 def main(file, **kwargs):
+    from .gvhmr import gvhmr
     gvhmr(file, **kwargs)
 
 
