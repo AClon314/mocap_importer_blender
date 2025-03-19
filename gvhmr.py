@@ -91,8 +91,8 @@ def apply_pose(
     armature.pose.bones[BODY[1]].location = trans
     armature.pose.bones[BODY[1]].keyframe_insert('location', frame=frame)
 
-    armature.pose.bones[BODY[0]].rotation_quaternion.w = 0.0
-    armature.pose.bones[BODY[0]].rotation_quaternion.x = -1.0
+    # armature.pose.bones[BODY[0]].rotation_quaternion.w = 1.0
+    # armature.pose.bones[BODY[0]].rotation_quaternion.x = 0.0
 
     for i, rot in enumerate(mrots, start=1):    # skip root!
         if i < kwargs.get('ibone', 22):
@@ -114,8 +114,10 @@ def per_frame(From_data, to_armature, at_frame, **kwargs):
     Log.info(f'done')
 
 
-def gvhmr(file, mapping=None, **kwargs):
-    data = load_pickle(file)
+def gvhmr(file, Range=(0, None), mapping=None, **kwargs):
+    is_range = len(Range) > 1
+    # data = load_pickle(file)
+    data = load_npz(file)
 
     armature = bpy.context.active_object
     if armature is None or armature.type != 'ARMATURE':
@@ -123,17 +125,21 @@ def gvhmr(file, mapping=None, **kwargs):
     mapping = None if mapping and mapping.lower() == 'auto' else mapping
     mapping = get_mapping_from_selected_or_objs(mapping)
     global BODY
-    BODY = MODS[mapping].BODY
+    BODY = import_mapping()[mapping].BODY   # type:ignore
 
     armature = bpy.context.active_object
     if armature is None:
         raise ValueError('No armature found')
 
-    frames = len(data['smpl_params_global']['transl'])
+    Range = list(Range)
+    if is_range and Range[1] is None:
+        Range[1] = len(data['smpl_params_global']['transl'])
+        Log.warning(f'Range[1] is None, set to {Range[1]}')
     # shape = results[character]['betas'].tolist()
-    for f in range(0, frames):
-        print(f'{ID}: {f}/{frames}\t{f/frames*100:.3f}%', end='\r')
-        bpy.context.scene.frame_set(f)
+    for f in range(*Range):
+        print(f'gvhmr {ID}: {f}/{Range[1]}\t{f/Range[1]*100:.3f}%', end='\r')
+        if is_range:
+            bpy.context.scene.frame_set(f)
         per_frame(data, armature, f, **kwargs)
         bpy.context.view_layer.update()
 

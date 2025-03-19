@@ -2,6 +2,8 @@
 https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blender.py
 """
 import os
+import re
+import string
 import bpy
 import pickle
 import importlib
@@ -10,6 +12,7 @@ from types import ModuleType
 from typing import List, Union, Literal
 DIR_SELF = os.path.dirname(__file__)
 DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
+MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
 TYPE_MAPPING = Literal['smpl', 'smplx']
 TYPE_I18N = Literal[
     'ca_AD', 'en_US', 'es', 'fr_FR', 'ja_JP', 'sk_SK', 'ur', 'vi_VN', 'zh_HANS',
@@ -32,11 +35,11 @@ def import_mapping():
     return mods
 
 
-def mapping_items():
+def mapping_items(self=None, context=None):
     items: List[tuple[str, str, str]] = [(
         'auto', 'Auto',
         'Auto detect armature type, based on name (will enhanced in later version)')]
-    for k, m in MODS.items():
+    for k, m in import_mapping().items():
         help = ''
         try:
             help = m.HELP[bpy.app.translations.locale]
@@ -80,7 +83,6 @@ def get_logger(name=__name__, level=10):
 
 Log = get_logger(__name__)
 ID = __package__.split('.')[-1] if __package__ else __name__
-MODS = import_mapping()
 
 try:
     from mathutils import Matrix, Vector, Quaternion, Euler
@@ -92,6 +94,10 @@ except ImportError as e:
 def load_pickle(file):
     with open(file, 'rb') as handle:
         return pickle.load(handle)
+
+
+def load_npz(file):
+    return np.load(file)
 
 
 def log_array(arr: Union[np.ndarray, list], name='ndarray'):
@@ -194,7 +200,7 @@ def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> Union[TYPE_MAPPIN
     keys = keys_BFS(bones)
     mapping = None
     max_similar = 0
-    for map, mod in MODS.items():
+    for map, mod in import_mapping().items():
         similar = get_similar(keys, mod.BONES)
         if similar > max_similar:
             max_similar = similar
@@ -207,7 +213,7 @@ def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> Union[TYPE_MAPPIN
 
 def get_mapping_from_selected_or_objs(mapping: Union[TYPE_MAPPING, None] = None):
     """
-    import mapping module by name  
+    import mapping module by name
     will set global variable BODY(temporary)
     """
     if mapping is None:
@@ -225,9 +231,57 @@ def get_mapping_from_selected_or_objs(mapping: Union[TYPE_MAPPING, None] = None)
     return mapping
 
 
+def add_mapping(armature):
+    """
+    add mapping based on selected armature
+    """
+    if not armature:
+        armature = bpy.context.active_object
+    if not armature or armature.type != 'ARMATURE':
+        raise ValueError('Please select an armature')
+    bones_tree = dump_bones(armature)
+    bones = keys_BFS(bones_tree)
+    map = {}
+    for x, my in zip(import_mapping()['smplx'].BONES, bones, strict=False):
+        map[x] = my
+
+    t = ''
+    with open(MAPPING_TEMPLATE, 'r') as f:
+        t = f.read()
+    # fastest way but not safe, {format} to 《》
+    t = re.sub(r'\{(.*)\}(?= *#)', r'《\1》', t)
+    # {} to 「」
+    t = re.sub(r'{', '「', t)
+    t = re.sub(r'}', '」', t)
+    # 《》 to {}
+    t = re.sub(r'《', '{', t)
+    t = re.sub(r'》', '}', t)
+    t = t.format(t, type_body=bones, map=map, bones_tree=bones_tree)
+    # 「」 to {}
+    t = re.sub(r'「', '{', t)
+    t = re.sub(r'」', '}', t)
+
+    filename = f'{armature.name}.py'
+    file = os.path.join(DIR_MAPPING, filename)
+    if os.path.exists(file):
+        raise FileExistsError(f'Mapping exists: {file}')
+    else:
+        with open(file, 'w') as f:
+            f.write(t)
+    Log.info(f'Restart addon to update mapping:  {file}')
+
+
+def update_pose(self, context) -> None:
+    """update pose when changed"""
+
+
 def main(file, **kwargs):
     from .gvhmr import gvhmr
     gvhmr(file, **kwargs)
+
+
+def unregister():
+    ...
 
 
 if __name__ == "__main__":

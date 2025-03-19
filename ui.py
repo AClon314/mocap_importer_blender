@@ -1,13 +1,14 @@
 # object,mesh,scene,wm,render,anim,material,texture,light,armature,curve,text,node,image,view3d,ed
 """bind to blender logic."""
 import bpy
+import traceback
+from typing import Callable
 try:
-    from .lib import get_logger, mapping_items, dump_bones, keys_BFS, main
+    from .lib import DIR_MAPPING, get_logger, mapping_items, dump_bones, keys_BFS, update_pose, add_mapping, main
 except ImportError as e:
     print(f'ui ⚠️ {e}')
     from lib import *
 Log = get_logger(__name__)
-MAPPING_ITEMS = mapping_items()
 BL_ID = 'MOCAP_PT_Panel'
 BL_CATAGORY = 'SMPL-X'
 BL_SPACE = 'VIEW_3D'
@@ -16,36 +17,62 @@ BL_CONTEXT = 'objectmode'
 def Props(context): return context.scene.mocap_importer
 
 
+def Execute(self, func: Callable):
+    """usage
+    ```python
+    def execute(self, context):
+        def wrap():
+            ...
+        return Execute(self, wrap)
+    ```
+    """
+    try:
+        func()
+        return {'FINISHED'}
+    except Exception as e:
+        self.report({'ERROR'}, str(e))
+        Log.error(traceback.format_exc())
+        return {'CANCELLED'}
+
+
 class Mocap_PropsGroup(bpy.types.PropertyGroup):
-    pkl_path: bpy.props.StringProperty(
-        name='pkl',
-        default='./hmr4d.pkl',
-        description='gvhmr/wilor ouput .pkl file, generated from mocap_wrapper',
+    input_video: bpy.props.StringProperty(
+        name='Input',
+        description='Video',
+        default='./input.mp4',
         subtype='FILE_PATH',
+    )  # type: ignore
+    input_pkl: bpy.props.StringProperty(
+        name='pkl',
+        description='gvhmr/wilor ouput .pkl file, generated from mocap_wrapper',
+        default='./hmr4d.pkl',
+        subtype='FILE_PATH',
+        # update=update_pose,
     )  # type: ignore
     mapping: bpy.props.EnumProperty(
         name='Armature',
-        items=MAPPING_ITEMS,
-        default=MAPPING_ITEMS[0][0],
         description='bones struct mapping type',
-    )  # type: ignore
-    import_start: bpy.props.IntProperty(
-        name='Start',
+        items=mapping_items,
         default=0,
-        min=0,
-        description='start frame to import',
-    )   # type: ignore
-    import_end: bpy.props.IntProperty(
-        name='End',
-        default=100,
-        description='end frame to import',
-    )   # type: ignore
+    )  # type: ignore
+    # import_start: bpy.props.IntProperty(
+    #     name='Start',
+    #     description='start frame to import',
+    #     default=0,
+    #     min=0,
+    #     # update=update_pose,
+    # )   # type: ignore
+    # import_end: bpy.props.IntProperty(
+    #     name='End',
+    #     default=100,
+    #     description='end frame to import',
+    # )   # type: ignore
     ibone: bpy.props.IntProperty(
         name='bone index',
-        default=22,
         description='bone index to bind, for debug',
+        default=22,
         min=0,
-        max=22,
+        max=24,
         step=1,
     )  # type: ignore
 
@@ -54,7 +81,6 @@ class DefaultPanel:
     bl_space_type = BL_SPACE
     bl_region_type = BL_REGION
     bl_category = BL_CATAGORY
-    bl_context = BL_CONTEXT
     bl_options = {"DEFAULT_CLOSED"}
 
 
@@ -62,7 +88,7 @@ class ExpandedPanel(DefaultPanel):
     bl_options = {"HEADER_LAYOUT_EXPAND"}
 
 
-class MOCAP_PT_Panel(ExpandedPanel, bpy.types.Panel):
+class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
     bl_label = 'Import'
     bl_idname = BL_ID
 
@@ -71,19 +97,19 @@ class MOCAP_PT_Panel(ExpandedPanel, bpy.types.Panel):
         props = Props(context)
         row = layout.row()
 
-        row.prop(props, 'pkl_path')
+        row.prop(props, 'input_pkl')
         row = layout.row()
         split = row.split(factor=0.75, align=True)
         split.prop(props, 'mapping')
         split.operator('armature.add_mapping', icon='ADD')
-        split.operator('armature.open_mapping', icon='FILE_FOLDER')
+        split.operator('wm.open_dir_mapping', icon='FILE_FOLDER')
 
         row = layout.row()
         row.operator('armature.load_mocap', icon='ARMATURE_DATA')
 
-        row = layout.row(align=True)
-        row.prop(props, 'import_start')
-        row.prop(props, 'import_end')
+        # row = layout.row(align=True)
+        # row.prop(props, 'import_start')
+        # row.prop(props, 'import_end')
 
         row = layout.row()
 
@@ -101,6 +127,16 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
         row.operator('armature.get_bones_info', icon='BONE_DATA')
 
 
+class RUN_PT_Panel(DefaultPanel, bpy.types.Panel):
+    bl_label = 'Init'
+
+    def draw(self, context):
+        layout = self.layout
+        props = Props(context)
+        row = layout.row()
+        row.prop(props, 'input_video')
+
+
 class LoadMocap_Operator(bpy.types.Operator):
     bl_idname = 'armature.load_mocap'
     bl_label = 'Load mocap'
@@ -110,9 +146,9 @@ class LoadMocap_Operator(bpy.types.Operator):
     def execute(self, context):
         scene = context.scene
         props = Props(context)
-        pkl_path = props.pkl_path
+        input_pkl = props.input_pkl
         mapping = None if props.mapping == 'Auto detect' else props.mapping
-        main(pkl_path, mapping=mapping, ibone=props.ibone + 1)
+        main(input_pkl, mapping=mapping, ibone=props.ibone + 1)
         return {'FINISHED'}
 
 
@@ -129,24 +165,27 @@ class GetBonesInfo_Operator(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class OpenMapping_Operator(bpy.types.Operator):
+    bl_idname = 'wm.open_dir_mapping'
+    bl_label = 'Open Folder'
+    bl_description = 'Open mapping folder'
+
+    def execute(self, context):
+        bpy.ops.wm.path_open(filepath=DIR_MAPPING)
+        return {'FINISHED'}
+
+
 class AddMapping_Operator(bpy.types.Operator):
     bl_idname = 'armature.add_mapping'
-    bl_label = 'Add mapping'
-    bl_description = 'Add mapping.py based on selected armature'
+    bl_label = 'Add Mapping'
+    bl_description = 'Add mapping based on selected armature'
+    bl_options = {'REGISTER'}
 
     def execute(self, context):
-        self.report({'INFO'}, "Add Mapping button clicked")
-        return {'FINISHED'}
-
-
-class OpenMapping_Operator(bpy.types.Operator):
-    bl_idname = 'armature.open_mapping'
-    bl_label = 'Open mapping'
-    bl_description = 'Open mapping.py based on selected armature'
-
-    def execute(self, context):
-        self.report({'INFO'}, "Open Mapping button clicked")
-        return {'FINISHED'}
+        def wrap():
+            add_mapping(context.active_object)
+            bpy.ops.wm.open_dir_mapping()   # type: ignore
+        return Execute(self, wrap)
 
 
 class ReloadScriptOperator(bpy.types.Operator):
