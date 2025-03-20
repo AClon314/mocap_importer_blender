@@ -125,7 +125,7 @@ def gvhmr(file, Range=(0, None), mapping=None, **kwargs):
     mapping = None if mapping and mapping.lower() == 'auto' else mapping
     mapping = get_mapping_from_selected_or_objs(mapping)
     global BODY
-    BODY = import_mapping()[mapping].BODY   # type:ignore
+    BODY = Mod()[mapping].BODY   # type:ignore
 
     armature = bpy.context.active_object
     if armature is None:

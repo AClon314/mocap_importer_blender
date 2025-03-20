@@ -22,7 +22,7 @@ TYPE_I18N = Literal[
 high_from_floor = 1.5
 
 
-def import_mapping():
+def Mod():
     files = os.listdir(DIR_MAPPING)
     pys = []
     mods: Dict[TYPE_MAPPING, ModuleType] = {}
@@ -39,7 +39,7 @@ def mapping_items(self=None, context=None):
     items: List[tuple[str, str, str]] = [(
         'auto', 'Auto',
         'Auto detect armature type, based on name (will enhanced in later version)')]
-    for k, m in import_mapping().items():
+    for k, m in Mod().items():
         help = ''
         try:
             help = m.HELP[bpy.app.translations.locale]
@@ -200,7 +200,7 @@ def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> Union[TYPE_MAPPIN
     keys = keys_BFS(bones)
     mapping = None
     max_similar = 0
-    for map, mod in import_mapping().items():
+    for map, mod in Mod().items():
         similar = get_similar(keys, mod.BONES)
         if similar > max_similar:
             max_similar = similar
@@ -242,7 +242,7 @@ def add_mapping(armature):
     bones_tree = dump_bones(armature)
     bones = keys_BFS(bones_tree)
     map = {}
-    for x, my in zip(import_mapping()['smplx'].BONES, bones, strict=False):
+    for x, my in zip(Mod()['smplx'].BONES, bones, strict=False):
         map[x] = my
 
     t = ''
