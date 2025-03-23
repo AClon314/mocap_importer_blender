@@ -6,4 +6,4 @@
 
 Currently support gvhmr as `.npz` file.
 
-![screenshot](_files/addon.png)
+![screenshot](doc/addon.png)
