@@ -1,3 +1,4 @@
+from optparse import Option
 from .lib import *
 Log = get_logger(__name__)
 
@@ -115,7 +116,12 @@ def per_frame(data: MotionData, to_armature, at_frame: int, **kwargs):
     apply_pose(translation, pose, to_armature, at_frame, **kwargs)
 
 
-def gvhmr(data: MotionData, frame_range=(0, None), mapping='auto', **kwargs):
+def gvhmr(
+    data: MotionData,
+    frame_range=(0, None),
+    mapping: Optional[TYPE_MAPPING] = None,
+    **kwargs
+):
     """
     per person
 
@@ -133,7 +139,7 @@ def gvhmr(data: MotionData, frame_range=(0, None), mapping='auto', **kwargs):
     armature = bpy.context.active_object
     if armature is None or armature.type != 'ARMATURE':
         bpy.ops.scene.smplx_add_gender()    # type: ignore
-    mapping = None if mapping and mapping.lower() == 'auto' else mapping
+    mapping = None if mapping == 'auto' else mapping
     mapping = get_mapping_from_selected_or_objs(mapping)
 
     # mapping = data.mappings

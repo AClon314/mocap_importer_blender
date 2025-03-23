@@ -1,6 +1,7 @@
 """
 https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blender.py
 """
+from json import load
 import os
 import re
 import bpy
@@ -18,6 +19,7 @@ TYPE_I18N = Literal[
     'de_DE', 'it_IT', 'ka', 'ko_KR', 'pt_BR', 'pt_PT', 'ru_RU', 'sw', 'ta', 'tr_TR', 'uk_UA', 'zh_HANT',
     'ab', 'ar_EG', 'be', 'bg_BG', 'cs_CZ', 'da', 'el_GR', 'eo', 'eu_EU', 'fa_IR', 'fi_FI', 'ha', 'he_IL', 'hi_IN', 'hr_HR', 'hu_HU', 'id_ID', 'km', 'ky_KG', 'lt', 'ne_NP', 'nl_NL', 'pl_PL', 'ro_RO', 'sl', 'sr_RS', 'sr_RS@latin', 'sv_SE', 'th_TH'
 ]
+MOTION_DATA = None
 
 
 def skip_or_in(part, full, pattern=';{};'):
@@ -40,7 +42,7 @@ def Mod():
     return mods
 
 
-def mapping_items(self=None, context=None):
+def items_mapping(self=None, context=None):
     items: List[tuple[str, str, str]] = [(
         'auto', 'Auto',
         'Auto detect armature type, based on name (will enhanced in later version)')]
@@ -53,6 +55,27 @@ def mapping_items(self=None, context=None):
             help = m.__doc__ if m.__doc__ else ''
         items.append((k, k, help))
     return items
+
+
+def items_motions(self=None, context=None):
+    items: List[tuple[str, str, str]] = []
+    if MOTION_DATA is None:
+        load_data()
+    if MOTION_DATA is not None:
+        for k in MOTION_DATA.persons:
+            items.append((k, k, ''))
+    else:
+        raise ValueError('Failed to load motion data')
+    return items
+
+
+def load_data(self=None, context=None):
+    """load motion data when npz file path changed"""
+    global MOTION_DATA
+    if MOTION_DATA is not None:
+        del MOTION_DATA
+    file = bpy.context.scene.mocap_importer.input_npz   # type: ignore
+    MOTION_DATA = MotionData(npz=file)
 
 
 def get_logger(name=__name__, level=10):
@@ -360,14 +383,15 @@ def add_mapping(armature):
     Log.info(f'Restart addon to update mapping:  {file}')
 
 
-def update_pose(self, context) -> None:
-    """update pose when changed"""
-
-
-def load_mocap(file, **kwargs):
+def apply_motion(person: Union[str, int], mapping: Optional[TYPE_MAPPING], **kwargs):
     from .gvhmr import gvhmr
-    data = MotionData(npz=file)
-    gvhmr(data('smplx', 'gvhmr', person=0), **kwargs)
+    if MOTION_DATA is None:
+        raise ValueError('Failed to load motion data')
+    gvhmr(MOTION_DATA('smplx', 'gvhmr', person=person), mapping=mapping, **kwargs)
+
+
+def register():
+    ...
 
 
 def unregister():

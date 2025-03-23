@@ -4,7 +4,7 @@ import bpy
 import traceback
 from typing import Callable
 try:
-    from .lib import DIR_MAPPING, get_logger, mapping_items, dump_bones, keys_BFS, update_pose, add_mapping, load_mocap
+    from .lib import DIR_MAPPING, get_logger, items_mapping, dump_bones, keys_BFS, load_data, add_mapping, apply_motion, items_motions
 except ImportError as e:
     print(f'ui ⚠️ {e}')
     from lib import *
@@ -47,12 +47,18 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         description='gvhmr/wilor ouput .npz file, generated from mocap_wrapper',
         default='./mocap_example.npz',
         subtype='FILE_PATH',
-        # update=update_pose,
+        update=load_data,
+    )  # type: ignore
+    motions: bpy.props.EnumProperty(
+        name='Action',
+        description='load which motion action',
+        items=items_motions,
+        default=0,
     )  # type: ignore
     mapping: bpy.props.EnumProperty(
         name='Armature',
         description='re-mapping to which bones struct',
-        items=mapping_items,
+        items=items_mapping,
         default=0,
     )  # type: ignore
     # import_start: bpy.props.IntProperty(
@@ -105,6 +111,9 @@ class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
         split.operator('wm.open_dir_mapping', icon='FILE_FOLDER')
 
         row = layout.row()
+        row.prop(props, 'motions')
+
+        row = layout.row()
         row.operator('armature.load_mocap', icon='ARMATURE_DATA')
 
         # row = layout.row(align=True)
@@ -148,7 +157,7 @@ class LoadMocap_Operator(bpy.types.Operator):
         props = Props(context)
         input_npz = props.input_npz
         mapping = None if props.mapping == 'Auto detect' else props.mapping
-        load_mocap(input_npz, mapping=mapping, ibone=props.ibone + 1)
+        apply_motion(props.motions, mapping=mapping, ibone=props.ibone + 1)
         return {'FINISHED'}
 
 
