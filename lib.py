@@ -3,23 +3,29 @@ https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blende
 """
 import os
 import re
-import string
 import bpy
-import pickle
 import importlib
 import numpy as np
 from types import ModuleType
-from typing import List, Union, Literal
+from typing import Dict, List, Optional, Union, Literal, get_args
 DIR_SELF = os.path.dirname(__file__)
 DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
 MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
 TYPE_MAPPING = Literal['smpl', 'smplx']
+TYPE_RUN = Literal['gvhmr', 'wilor']
 TYPE_I18N = Literal[
     'ca_AD', 'en_US', 'es', 'fr_FR', 'ja_JP', 'sk_SK', 'ur', 'vi_VN', 'zh_HANS',
     'de_DE', 'it_IT', 'ka', 'ko_KR', 'pt_BR', 'pt_PT', 'ru_RU', 'sw', 'ta', 'tr_TR', 'uk_UA', 'zh_HANT',
     'ab', 'ar_EG', 'be', 'bg_BG', 'cs_CZ', 'da', 'el_GR', 'eo', 'eu_EU', 'fa_IR', 'fi_FI', 'ha', 'he_IL', 'hi_IN', 'hr_HR', 'hu_HU', 'id_ID', 'km', 'ky_KG', 'lt', 'ne_NP', 'nl_NL', 'pl_PL', 'ro_RO', 'sl', 'sr_RS', 'sr_RS@latin', 'sv_SE', 'th_TH'
 ]
 high_from_floor = 1.5
+
+
+def skip_or_in(part, full, pattern=';{};'):
+    if pattern:
+        part = pattern.format(part) if part else None
+        full = pattern.format(full) if full else None
+    return (not part) or (not full) or (part in full)
 
 
 def Mod():
@@ -90,14 +96,98 @@ try:
 except ImportError as e:
     Log.warning(e)
 
-
-def load_pickle(file):
-    with open(file, 'rb') as handle:
-        return pickle.load(handle)
+TYPE_MotionData_KEY = Literal['pose', 'rotate', 'shape', 'trans']
+MotionData_KEY = get_args(TYPE_MotionData_KEY)
 
 
-def load_npz(file):
-    return np.load(file)
+class MotionData(dict):
+    def keys(self) -> List[str]:
+        return list(super().keys())
+
+    def values(self) -> List[np.ndarray]:
+        return list(super().values())
+
+    def __init__(self, /, *args, npz: Union[str, os.PathLike, None] = None, lazy=False, **kwargs):
+        """
+        Inherit from dict
+        Args:
+            npz (str, Path, optional): npz file path.
+            lazy (bool, optional): if True, do NOT load npz file.
+
+        usage:
+        ```python
+        data(mapping='smplx', run='gvhmr', key='trans', coord='global').values()[0]
+        ```
+        """
+        super().__init__(*args, **kwargs)
+        if npz:
+            self.npz = npz
+            if not lazy:
+                self.update(np.load(npz, allow_pickle=True))
+
+    def __call__(
+        self,
+        mapping: Optional[TYPE_MAPPING] = None,
+        run: Optional[TYPE_RUN] = None,
+        key: Union[TYPE_MotionData_KEY, str, None] = None,
+        person: Union[str, int, None] = None,
+        coord: Optional[Literal['global', 'incam']] = None,
+    ):
+        D = MotionData(npz=self.npz, lazy=True)
+        if isinstance(person, int):
+            person = f'person{person}'
+
+        for k, v in self.items():
+            is_in = [skip_or_in(args, k) for args in [mapping, run, key, person, coord]]
+            is_in = all(is_in)
+            if is_in:
+                D[k] = v
+        return D
+
+    def distinct(self, col_num: int):
+        """
+        Args:
+            col_num (int): 0 for mapping, 1 for run, 2 for key, 3 for person, 4 for coord
+            literal : filter keys by Literal. Defaults to None.
+
+        """
+        L: List[str] = []
+        for k in self.keys():
+            if isinstance(k, str):
+                keys = k.split(';')
+                if len(keys) > col_num:
+                    col_name = keys[col_num]
+                    if col_name not in L:
+                        L.append(col_name)
+        return L
+
+    @property
+    def mappings(self):
+        return self.distinct(0)
+
+    @property
+    def runs(self):
+        return self.distinct(1)
+
+    @property
+    def customKeys(self):
+        return self.distinct(2)
+
+    @property
+    def persons(self):
+        return self.distinct(3)
+
+    @property
+    def coords(self):
+        return self.distinct(4)
+
+    @property
+    def value(self):
+        """same as:
+        ```python
+        return self.values()[0]
+        ```"""
+        return self.values()[0]
 
 
 def log_array(arr: Union[np.ndarray, list], name='ndarray'):
@@ -275,9 +365,10 @@ def update_pose(self, context) -> None:
     """update pose when changed"""
 
 
-def main(file, **kwargs):
+def load_mocap(file, **kwargs):
     from .gvhmr import gvhmr
-    gvhmr(file, **kwargs)
+    data = MotionData(npz=file)
+    gvhmr(data('smplx', 'gvhmr', person=0), **kwargs)
 
 
 def unregister():
@@ -287,8 +378,10 @@ def unregister():
 if __name__ == "__main__":
     # debug
     try:
-        from mapping.smplx import *
-        ret = keys_BFS(BONES_TREE)
-        print(ret)
+        data = MotionData(npz='/home/n/document/code/GVHMR/output/demo/jumper/mocap_jumper.npz')
+        print(data(mapping='smplx', run='gvhmr', key='trans', coord='global').values()[0])
+        # from mapping.smplx import *
+        # ret = keys_BFS(BONES_TREE)
+        # print(ret)
     except ImportError:
         ...

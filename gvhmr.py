@@ -91,39 +91,54 @@ def apply_pose(
     armature.pose.bones[BODY[1]].location = trans
     armature.pose.bones[BODY[1]].keyframe_insert('location', frame=frame)
 
-    # armature.pose.bones[BODY[0]].rotation_quaternion.w = 1.0
-    # armature.pose.bones[BODY[0]].rotation_quaternion.x = 0.0
-
     for i, rot in enumerate(mrots, start=1):    # skip root!
         if i < kwargs.get('ibone', 22):
             bone = armature.pose.bones[BODY[i]]
             # log_array(rot, f'{i}_{BODY[i]}')
             bone.rotation_quaternion = Matrix(rot).to_quaternion()  # type: ignore
+            # bone.rotation_quaternion = Quaternion()
 
             if frame is not None:
                 bone.keyframe_insert('rotation_quaternion', frame=frame)
 
 
-def per_frame(From_data, to_armature, at_frame, **kwargs):
-    global_translation = From_data['smpl_params_global']['transl'][at_frame]
-    global_orient: np.ndarray = From_data['smpl_params_global']['global_orient'][at_frame]
-    body_pose: np.ndarray = From_data['smpl_params_global']['body_pose'][at_frame]
-    body_pose = body_pose.reshape(int(len(body_pose) / 3), 3)   # (21,3)
-    body_pose = np.vstack([global_orient, body_pose])  # (22,3)
-    apply_pose(global_translation, body_pose, to_armature, at_frame, **kwargs)
+def per_frame(data: MotionData, to_armature, at_frame: int, **kwargs):
+    translation = data(key='trans', coord='global').value[at_frame]  # ['smpl_params_global']['transl'][at_frame]
+    rotate: np.ndarray = data(key='rotate', coord='global').value[at_frame]  # ['smpl_params_global']['global_orient'][at_frame]
+    pose: np.ndarray = data(key='pose', coord='global').value[at_frame]  # ['smpl_params_global']['body_pose'][at_frame]
+    pose = pose.reshape(int(len(pose) / 3), 3)   # (21,3)
+    pose = np.vstack([rotate, pose])  # (22,3)
+    apply_pose(translation, pose, to_armature, at_frame, **kwargs)
     Log.info(f'done')
 
 
-def gvhmr(file, Range=(0, None), mapping=None, **kwargs):
-    is_range = len(Range) > 1
-    # data = load_pickle(file)
-    data = load_npz(file)
+def gvhmr(data: MotionData, frame_range=(0, None), **kwargs):
+    """
+    per person
+
+    Args:
+        data (MotionData, dict): mocap data
+        frame_range (tuple, optional): Frames range. Defaults to (0, Max_frames).
+
+    Example:
+    ```python
+    gvhmr(data('smplx', 'gvhmr', person=0))
+    ```
+    """
+    is_range = len(frame_range) > 1
 
     armature = bpy.context.active_object
     if armature is None or armature.type != 'ARMATURE':
         bpy.ops.scene.smplx_add_gender()    # type: ignore
-    mapping = None if mapping and mapping.lower() == 'auto' else mapping
-    mapping = get_mapping_from_selected_or_objs(mapping)
+    # mapping = None if mapping and mapping.lower() == 'auto' else mapping
+    # mapping = get_mapping_from_selected_or_objs(mapping)
+    mapping = data.mappings
+    if len(mapping) == 0:
+        raise ValueError('Mapping must be one')
+    elif len(mapping) > 1:
+        Log.warning(f'Mapping must be one: {mapping}, fallback to {mapping[0]}')
+    mapping = mapping[0]
+
     global BODY
     BODY = Mod()[mapping].BODY   # type:ignore
 
@@ -131,16 +146,17 @@ def gvhmr(file, Range=(0, None), mapping=None, **kwargs):
     if armature is None:
         raise ValueError('No armature found')
 
-    Range = list(Range)
-    if is_range and Range[1] is None:
-        Range[1] = len(data['smpl_params_global']['transl'])
-        Log.warning(f'Range[1] is None, set to {Range[1]}')
+    frame_range = list(frame_range)
+    if is_range and frame_range[1] is None:
+        frame_range[1] = len(data(mapping=mapping, run='gvhmr', key='trans', coord='global').value)  # type: ignore
+        Log.warning(f'Range[1] is None, set to {frame_range[1]}')
     # shape = results[character]['betas'].tolist()
-    for f in range(*Range):
-        print(f'gvhmr {ID}: {f}/{Range[1]}\t{f/Range[1]*100:.3f}%', end='\r')
+    for f in range(*frame_range):
+        print(f'gvhmr {ID}: {f}/{frame_range[1]}\t{f/frame_range[1]*100:.3f}%', end='\r')
         if is_range:
             bpy.context.scene.frame_set(f)
         per_frame(data, armature, f, **kwargs)
         bpy.context.view_layer.update()
 
     Log.info(f'done')
+    del data

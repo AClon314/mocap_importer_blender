@@ -4,7 +4,7 @@ import bpy
 import traceback
 from typing import Callable
 try:
-    from .lib import DIR_MAPPING, get_logger, mapping_items, dump_bones, keys_BFS, update_pose, add_mapping, main
+    from .lib import DIR_MAPPING, get_logger, mapping_items, dump_bones, keys_BFS, update_pose, add_mapping, load_mocap
 except ImportError as e:
     print(f'ui ⚠️ {e}')
     from lib import *
@@ -42,16 +42,16 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         default='./input.mp4',
         subtype='FILE_PATH',
     )  # type: ignore
-    input_pkl: bpy.props.StringProperty(
-        name='pkl',
-        description='gvhmr/wilor ouput .pkl file, generated from mocap_wrapper',
-        default='./hmr4d.pkl',
+    input_npz: bpy.props.StringProperty(
+        name='npz',
+        description='gvhmr/wilor ouput .npz file, generated from mocap_wrapper',
+        default='./mocap_example.npz',
         subtype='FILE_PATH',
         # update=update_pose,
     )  # type: ignore
     mapping: bpy.props.EnumProperty(
         name='Armature',
-        description='bones struct mapping type',
+        description='re-mapping to which bones struct',
         items=mapping_items,
         default=0,
     )  # type: ignore
@@ -97,7 +97,7 @@ class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
         props = Props(context)
         row = layout.row()
 
-        row.prop(props, 'input_pkl')
+        row.prop(props, 'input_npz')
         row = layout.row()
         split = row.split(factor=0.75, align=True)
         split.prop(props, 'mapping')
@@ -141,14 +141,14 @@ class LoadMocap_Operator(bpy.types.Operator):
     bl_idname = 'armature.load_mocap'
     bl_label = 'Load mocap'
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = 'Load mocap data from pkl file.'
+    bl_description = 'Load mocap data from npz file.'
 
     def execute(self, context):
         scene = context.scene
         props = Props(context)
-        input_pkl = props.input_pkl
+        input_npz = props.input_npz
         mapping = None if props.mapping == 'Auto detect' else props.mapping
-        main(input_pkl, mapping=mapping, ibone=props.ibone + 1)
+        load_mocap(input_npz, mapping=mapping, ibone=props.ibone + 1)
         return {'FINISHED'}
 
 
