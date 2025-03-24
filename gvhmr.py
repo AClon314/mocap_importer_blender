@@ -1,3 +1,4 @@
+from curses import KEY_COPY
 from optparse import Option
 from .lib import *
 Log = get_logger(__name__)
@@ -76,35 +77,28 @@ def get_global_pose(global_pose, armature, frame=None):
 
 
 def apply_pose(
-    trans,
+    action: 'bpy.types.Action',
     pose,
-    armature: 'bpy.types.Object',
-    frame=0,
+    trans,
+    frame: int,
     **kwargs
 ):
-    """apply trans pose and shape to character"""
-    root = pose[0]
-
+    """Apply translation, pose, and shape to character using Action and F-Curves."""
     rots = [Rodrigues(rot) for rot in pose]
-
     trans = Vector((trans[0], trans[1], trans[2]))
 
-    armature.pose.bones[BODY[0]].location = trans
-    armature.pose.bones[BODY[0]].keyframe_insert('location', frame=frame)
+    # Insert translation keyframe
+    keyframe_add(action, f'pose.bones["{BODY[0]}"].location', frame, trans)
 
-    # armature.pose.bones[BODY[0]].rotation_euler = Euler((root[0], root[1], root[2]), 'XYZ')  # -pi, pi
-    # armature.pose.bones[BODY[0]].keyframe_insert('rotation_euler', frame=frame)
-
-    for i, rot in enumerate(rots, start=1):    # skip root!
+    # Insert rotation keyframes for each bone
+    for i, rot in enumerate(rots, start=1):  # Skip root!
         if i <= kwargs.get('ibone', 24):
-            bone = armature.pose.bones[BODY[i]]
-            # log_array(rot, f'{i}_{BODY[i]}')
-            # -1, 1
-            bone.rotation_quaternion = Matrix(rot).to_quaternion()  # type: ignore
-            # bone.rotation_quaternion = Quaternion()
+            bone_name = BODY[i]
+            quat = Matrix(rot).to_quaternion()  # type: ignore
 
-            if frame is not None:
-                bone.keyframe_insert('rotation_quaternion', frame=frame)
+            keyframe_add(action, f'pose.bones["{bone_name}"].rotation_quaternion', frame, quat)
+
+    return action
 
 
 def per_frame(data: MotionData, to_armature, at_frame: int, **kwargs):
@@ -118,7 +112,7 @@ def per_frame(data: MotionData, to_armature, at_frame: int, **kwargs):
 
 def gvhmr(
     data: MotionData,
-    frame_range=(0, None),
+    range_frame=(0, None),
     mapping: Optional[TYPE_MAPPING] = None,
     **kwargs
 ):
@@ -134,39 +128,39 @@ def gvhmr(
     gvhmr(data('smplx', 'gvhmr', person=0))
     ```
     """
-    is_range = len(frame_range) > 1
+    is_range = len(range_frame) > 1
 
     armature = bpy.context.active_object
     if armature is None or armature.type != 'ARMATURE':
-        bpy.ops.scene.smplx_add_gender()    # type: ignore
+        raise ValueError('No armature found')
+
     mapping = None if mapping == 'auto' else mapping
     mapping = get_mapping_from_selected_or_objs(mapping)
-
-    # mapping = data.mappings
-    # if len(mapping) == 0:
-    #     raise ValueError('Mapping must be one')
-    # elif len(mapping) > 1:
-    #     Log.warning(f'Mapping must be one: {mapping}, fallback to {mapping[0]}')
-    # mapping = mapping[0]
-
     global BODY
     BODY = Mod()[mapping].BODY   # type:ignore
 
-    armature = bpy.context.active_object
-    if armature is None:
-        raise ValueError('No armature found')
+    data = data(mapping=data.mapping, run='gvhmr')  # type: ignore
+    translation = data(key='trans', coord='global').value
+    rotate = data(key='rotate', coord='global').value
+    rotate = rotate.reshape(-1, 1, 3)
+    Log.debug(f'shape={rotate.shape}')
+    pose = data(key='pose', coord='global').value
+    pose = pose.reshape(-1, len(pose[0]) // 3, 3)   # (frames,21,3)
+    pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3)
 
-    frame_range = list(frame_range)
-    if is_range and frame_range[1] is None:
-        frame_range[1] = len(data(mapping='smplx', run='gvhmr', key='trans', coord='global').value)  # type: ignore
-        Log.warning(f'Range[1] is None, set to {frame_range[1]}')
+    range_frame = list(range_frame)
+    if is_range and range_frame[1] is None:
+        range_frame[1] = len(translation)  # type: ignore
+        Log.info(f'range_frame[1] fallback to {range_frame[1]}')
+    Range = range(*range_frame)
     # shape = results[character]['betas'].tolist()
-    for f in range(*frame_range):
-        print(f'gvhmr {ID}: {f}/{frame_range[1]}\t{f/frame_range[1]*100:.3f}%', end='\r')
-        if is_range:
-            bpy.context.scene.frame_set(f)
-        per_frame(data, armature, f, **kwargs)
-        bpy.context.view_layer.update()
+
+    Log.debug(f'armature={armature}')
+
+    with new_action(armature, ';'.join([data.who, data.key_custom, data.run_keyname, data.mapping])) as action:
+        for f in Range:
+            print(f'gvhmr {ID}: {f}/{range_frame[1]}\t{f/range_frame[1]*100:.3f}%', end='\r')
+            apply_pose(action, pose[f], translation[f], f, **kwargs)
 
     Log.info(f'done')
     del data

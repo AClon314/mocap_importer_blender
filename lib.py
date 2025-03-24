@@ -1,14 +1,15 @@
 """
 https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blender.py
 """
-from json import load
+from logging import warn
 import os
 import re
 import bpy
 import importlib
 import numpy as np
+from contextlib import contextmanager
 from types import ModuleType
-from typing import Dict, List, Optional, Union, Literal, get_args
+from typing import Dict, List, Optional, Sequence, Union, Literal, TypeVar, get_args
 DIR_SELF = os.path.dirname(__file__)
 DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
 MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
@@ -19,14 +20,68 @@ TYPE_I18N = Literal[
     'de_DE', 'it_IT', 'ka', 'ko_KR', 'pt_BR', 'pt_PT', 'ru_RU', 'sw', 'ta', 'tr_TR', 'uk_UA', 'zh_HANT',
     'ab', 'ar_EG', 'be', 'bg_BG', 'cs_CZ', 'da', 'el_GR', 'eo', 'eu_EU', 'fa_IR', 'fi_FI', 'ha', 'he_IL', 'hi_IN', 'hr_HR', 'hu_HU', 'id_ID', 'km', 'ky_KG', 'lt', 'ne_NP', 'nl_NL', 'pl_PL', 'ro_RO', 'sl', 'sr_RS', 'sr_RS@latin', 'sv_SE', 'th_TH'
 ]
+T = TypeVar('T')
 MOTION_DATA = None
 
 
+def get_logger(name=__name__, level=10):
+    """```python
+    Log = get_logger(__name__)
+    ```"""
+    import logging
+    Log = logging.getLogger(name)
+    Log.setLevel(level)
+    Log.propagate = False   # disable propagate to root logger
+    stream_handler = logging.StreamHandler()
+
+    # 添加日志级别前缀
+    level_prefix = {
+        logging.DEBUG: '🐛 DEBUG',
+        logging.INFO: '💬 INFO',
+        logging.WARNING: '⚠️ WARNING',
+        logging.ERROR: '❌ ERROR',
+    }
+
+    class CustomFormatter(logging.Formatter):
+        def format(self, record):
+            record.levelname = level_prefix.get(record.levelno, record.levelname)
+            return super().format(record)
+
+    stream_handler.setFormatter(
+        CustomFormatter(
+            '%(levelname)s\t%(asctime)s  %(message)s\t%(name)s:%(lineno)d',
+            datefmt='%H:%M:%S'))
+    Log.addHandler(stream_handler)
+    return Log
+
+
+Log = get_logger(__name__)
+ID = __package__.split('.')[-1] if __package__ else __name__
+
+
+try:
+    from mathutils import Matrix, Vector, Quaternion, Euler
+except ImportError as e:
+    Log.warning(e)
+
+TYPE_MotionData_KEY = Literal['pose', 'rotate', 'shape', 'trans']
+MotionData_KEY = get_args(TYPE_MotionData_KEY)
+
+
 def skip_or_in(part, full, pattern=';{};'):
+    """used in class `MotionData`"""
     if pattern:
         part = pattern.format(part) if part else None
         full = pattern.format(full) if full else None
     return (not part) or (not full) or (part in full)
+
+
+def warn_or_return_first(L: List[T]) -> T:
+    """used in class `MotionData`"""
+    Len = len(L)
+    if Len > 1:
+        Log.warning(f'{Len} > 1 from {L}')
+    return L[0]
 
 
 def Mod():
@@ -62,7 +117,7 @@ def items_motions(self=None, context=None):
     if MOTION_DATA is None:
         load_data()
     if MOTION_DATA is not None:
-        for k in MOTION_DATA.persons:
+        for k in MOTION_DATA.whos:
             items.append((k, k, ''))
     else:
         raise ValueError('Failed to load motion data')
@@ -78,48 +133,70 @@ def load_data(self=None, context=None):
     MOTION_DATA = MotionData(npz=file)
 
 
-def get_logger(name=__name__, level=10):
-    """```python
-    Log = get_logger(__name__)
-    ```"""
-    import logging
-    Log = logging.getLogger(__name__)
-    Log.setLevel(level)
-    Log.propagate = False   # disable propagate to root logger
-    stream_handler = logging.StreamHandler()
+def keyframe_add(
+    action: 'bpy.types.Action',
+    data_path: str,
+    at_frame: int,
+    vector: Union[Sequence, Vector],
+):
+    """
+    Usage:
+    ```python
+    insert_frame(action, f'pose.bones["{BODY[i]}"].rotation_quaternion', frame, quat)
+    ```
+    """
+    kw = dict(data_path=data_path, index=0)
+    for i, x in enumerate(vector):
+        kw['index'] = i
+        fcurve = action.fcurves.find(**kw)
+        if not fcurve:
+            fcurve = action.fcurves.new(**kw)
+        fcurve.keyframe_points.insert(at_frame, value=x)
+    return action
 
-    # 添加日志级别前缀
-    level_prefix = {
-        logging.DEBUG: '🐛 DEBUG',
-        logging.INFO: '💬 INFO',
-        logging.WARNING: '⚠️ WARNING',
-        logging.ERROR: '❌ ERROR',
+
+def context_override(area='NLA_EDITOR'):
+    win = bpy.context.window
+    scr = win.screen
+    areas = [a for a in scr.areas if a.type == area]
+    if not areas:
+        raise RuntimeError(f"No area of type '{area}' found in the current screen.")
+    region = areas[0].regions[0]
+    override = {
+        'window': win,
+        'screen': scr,
+        'area': areas[0],
+        'region': region,
+        'scene': bpy.context.scene,
+        'object': bpy.context.object,
     }
-
-    class CustomFormatter(logging.Formatter):
-        def format(self, record):
-            record.levelname = level_prefix.get(record.levelno, record.levelname)
-            return super().format(record)
-
-    stream_handler.setFormatter(
-        CustomFormatter(
-            '%(levelname)s\t%(asctime)s  %(message)s\t%(name)s:%(lineno)d',
-            datefmt='%H:%M:%S'))
-    Log.addHandler(stream_handler)
-    return Log
+    Log.debug(f'Context override: {override}')
+    return override
 
 
-Log = get_logger(__name__)
-ID = __package__.split('.')[-1] if __package__ else __name__
-
-try:
-    from mathutils import Matrix, Vector, Quaternion, Euler
-    from .gvhmr import gvhmr
-except ImportError as e:
-    Log.warning(e)
-
-TYPE_MotionData_KEY = Literal['pose', 'rotate', 'shape', 'trans']
-MotionData_KEY = get_args(TYPE_MotionData_KEY)
+@contextmanager
+def new_action(
+    obj: Optional['bpy.types.Object'] = None,
+    name='Action'
+):
+    """Create a new action for object, and restore the old action after context"""
+    old_action = None
+    try:
+        if not obj:
+            obj = bpy.context.active_object
+        if not obj:
+            raise ValueError('No object found')
+        if not obj.animation_data:
+            obj.animation_data_create()
+        if obj.animation_data.action:
+            old_action = obj.animation_data.action
+        action = obj.animation_data.action = bpy.data.actions.new(name=name)
+        yield action
+    finally:
+        if old_action and obj and obj.animation_data and obj.animation_data.action:
+            obj.animation_data.action = old_action
+        else:
+            Log.warning('No action to restore')
 
 
 class MotionData(dict):
@@ -152,15 +229,16 @@ class MotionData(dict):
         mapping: Optional[TYPE_MAPPING] = None,
         run: Optional[TYPE_RUN] = None,
         key: Union[TYPE_MotionData_KEY, str, None] = None,
-        person: Union[str, int, None] = None,
+        who: Union[str, int, None] = None,
         coord: Optional[Literal['global', 'incam']] = None,
     ):
+        # Log.debug(f'self.__dict__={self.__dict__}')
         D = MotionData(npz=self.npz, lazy=True)
-        if isinstance(person, int):
-            person = f'person{person}'
+        if isinstance(who, int):
+            who = f'person{who}'
 
         for k, v in self.items():
-            is_in = [skip_or_in(args, k) for args in [mapping, run, key, person, coord]]
+            is_in = [skip_or_in(args, k) for args in [mapping, run, key, who, coord]]
             is_in = all(is_in)
             if is_in:
                 D[k] = v
@@ -184,24 +262,35 @@ class MotionData(dict):
         return L
 
     @property
-    def mappings(self):
-        return self.distinct(0)
+    def mappings(self): return self.distinct(0)
 
     @property
-    def runs(self):
-        return self.distinct(1)
+    def runs_keyname(self): return self.distinct(1)
 
     @property
-    def customKeys(self):
+    def keys_custom(self):
+        """could return `[your_customkeys, 'pose', 'rotate', 'trans', 'shape']`"""
         return self.distinct(2)
 
     @property
-    def persons(self):
-        return self.distinct(3)
+    def whos(self): return self.distinct(3)
 
     @property
-    def coords(self):
-        return self.distinct(4)
+    def coords(self): return self.distinct(4)
+
+    @property
+    def mapping(self): return warn_or_return_first(self.mappings)
+    @property
+    def run_keyname(self): return warn_or_return_first(self.runs_keyname)
+
+    @property
+    def key_custom(self): return warn_or_return_first(self.keys_custom)
+
+    @property
+    def who(self): return warn_or_return_first(self.whos)
+
+    @property
+    def coord(self): return warn_or_return_first(self.coords)
 
     @property
     def value(self):
@@ -209,7 +298,15 @@ class MotionData(dict):
         ```python
         return self.values()[0]
         ```"""
-        return self.values()[0]
+        return warn_or_return_first(self.values())
+
+    @property
+    def key(self):
+        """return **FULL** keyname like `smplx;gvhmr;pose;person0;global`, same as:
+        ```python
+        return self.keys()[0]
+        ```"""
+        return self.keys()[0]
 
 
 def log_array(arr: Union[np.ndarray, list], name='ndarray'):
@@ -387,7 +484,7 @@ def apply_motion(person: Union[str, int], mapping: Optional[TYPE_MAPPING], **kwa
     from .gvhmr import gvhmr
     if MOTION_DATA is None:
         raise ValueError('Failed to load motion data')
-    gvhmr(MOTION_DATA('smplx', 'gvhmr', person=person), mapping=mapping, **kwargs)
+    gvhmr(MOTION_DATA('smplx', 'gvhmr', who=person), mapping=mapping, **kwargs)
 
 
 def register():
