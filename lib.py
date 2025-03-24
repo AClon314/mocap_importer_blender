@@ -1,10 +1,11 @@
 """
 https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blender.py
 """
-from logging import warn
 import os
 import re
 import bpy
+import logging
+import inspect
 import importlib
 import numpy as np
 from contextlib import contextmanager
@@ -22,29 +23,41 @@ TYPE_I18N = Literal[
 ]
 T = TypeVar('T')
 MOTION_DATA = None
+LEVEL_PREFIX = {
+    logging.DEBUG: '🐛DEBUG',
+    logging.INFO: '💬 INFO',
+    logging.WARNING: '⚠️  WARN',
+    logging.ERROR: '❌ERROR',
+    logging.CRITICAL: '⛔⛔CRITICAL',
+    logging.FATAL: '☠️FATAL',
+}
+
+
+def caller_name(skips=['caller_name', 'format', 'emit', 'handle', 'callHandlers', '_log', 'debug', 'info', 'warning', 'error', 'critical', 'fatal'], frame=None):
+    if frame is None:
+        frame = inspect.currentframe()
+    while frame:
+        if frame.f_code.co_name in skips:
+            frame = frame.f_back
+            continue
+        name = frame.f_code.co_name
+        return f'{name}()'
+    return ''
 
 
 def get_logger(name=__name__, level=10):
     """```python
     Log = get_logger(__name__)
     ```"""
-    import logging
     Log = logging.getLogger(name)
     Log.setLevel(level)
     Log.propagate = False   # disable propagate to root logger
     stream_handler = logging.StreamHandler()
 
-    # 添加日志级别前缀
-    level_prefix = {
-        logging.DEBUG: '🐛 DEBUG',
-        logging.INFO: '💬 INFO',
-        logging.WARNING: '⚠️ WARNING',
-        logging.ERROR: '❌ ERROR',
-    }
-
     class CustomFormatter(logging.Formatter):
         def format(self, record):
-            record.levelname = level_prefix.get(record.levelno, record.levelname)
+            record.levelname = LEVEL_PREFIX.get(record.levelno, record.levelname)
+            record.msg = f'{record.msg}\t{caller_name()}'
             return super().format(record)
 
     stream_handler.setFormatter(
@@ -57,7 +70,6 @@ def get_logger(name=__name__, level=10):
 
 Log = get_logger(__name__)
 ID = __package__.split('.')[-1] if __package__ else __name__
-
 
 try:
     from mathutils import Matrix, Vector, Quaternion, Euler
@@ -191,6 +203,7 @@ def new_action(
         if obj.animation_data.action:
             old_action = obj.animation_data.action
         action = obj.animation_data.action = bpy.data.actions.new(name=name)
+        Log.debug(f'old_action={old_action}')
         yield action
     finally:
         if old_action and obj and obj.animation_data and obj.animation_data.action:
