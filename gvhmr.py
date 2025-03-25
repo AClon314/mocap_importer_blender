@@ -143,7 +143,6 @@ def gvhmr(
     translation = data(key='trans', coord='global').value
     rotate = data(key='rotate', coord='global').value
     rotate = rotate.reshape(-1, 1, 3)
-    Log.debug(f'shape={rotate.shape}')
     pose = data(key='pose', coord='global').value
     pose = pose.reshape(-1, len(pose[0]) // 3, 3)   # (frames,21,3)
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3)

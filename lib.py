@@ -16,7 +16,7 @@ DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
 MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
 TYPE_MAPPING = Literal['smpl', 'smplx']
 TYPE_RUN = Literal['gvhmr', 'wilor']
-TYPE_I18N = Literal[
+TYPE_I18N = Literal[  # blender 4.3.2
     'ca_AD', 'en_US', 'es', 'fr_FR', 'ja_JP', 'sk_SK', 'ur', 'vi_VN', 'zh_HANS',
     'de_DE', 'it_IT', 'ka', 'ko_KR', 'pt_BR', 'pt_PT', 'ru_RU', 'sw', 'ta', 'tr_TR', 'uk_UA', 'zh_HANT',
     'ab', 'ar_EG', 'be', 'bg_BG', 'cs_CZ', 'da', 'el_GR', 'eo', 'eu_EU', 'fa_IR', 'fi_FI', 'ha', 'he_IL', 'hi_IN', 'hr_HR', 'hu_HU', 'id_ID', 'km', 'ky_KG', 'lt', 'ne_NP', 'nl_NL', 'pl_PL', 'ro_RO', 'sl', 'sr_RS', 'sr_RS@latin', 'sv_SE', 'th_TH'
@@ -33,15 +33,21 @@ LEVEL_PREFIX = {
 }
 
 
-def caller_name(skips=['caller_name', 'format', 'emit', 'handle', 'callHandlers', '_log', 'debug', 'info', 'warning', 'error', 'critical', 'fatal'], frame=None):
+def caller_name(skips=8, frame=None):
+    """skip: ['caller_name', 'format', 'emit', 'handle', 'callHandlers', '_log', 'debug', 'info', 'warning', 'error', 'critical', 'fatal']"""
     if frame is None:
         frame = inspect.currentframe()
     while frame:
-        if frame.f_code.co_name in skips:
+        if skips >= 0:
+            skips -= 1
             frame = frame.f_back
             continue
-        name = frame.f_code.co_name
-        return f'{name}()'
+        name = frame.f_code.co_name + '()'
+        parent = frame.f_back
+        name_parent = ''
+        if parent:
+            name_parent = '←' + parent.f_code.co_name + '()'
+        return name + name_parent
     return ''
 
 
@@ -168,6 +174,15 @@ def keyframe_add(
 
 
 def context_override(area='NLA_EDITOR'):
+    """
+    Not recommended to use, all **`bpy.ops`** are **slower** than **pure data** manipulation.
+
+    usage:
+    ```python
+    with bpy.context.temp_override(**context_override()):
+        bpy.ops.nla.action_pushdown(override)
+    ```
+    """
     win = bpy.context.window
     scr = win.screen
     areas = [a for a in scr.areas if a.type == area]
@@ -180,7 +195,7 @@ def context_override(area='NLA_EDITOR'):
         'area': areas[0],
         'region': region,
         'scene': bpy.context.scene,
-        'object': bpy.context.object,
+        'object': bpy.context.active_object,
     }
     Log.debug(f'Context override: {override}')
     return override
@@ -189,10 +204,12 @@ def context_override(area='NLA_EDITOR'):
 @contextmanager
 def new_action(
     obj: Optional['bpy.types.Object'] = None,
-    name='Action'
+    name='Action',
+    nla_push=True,
 ):
-    """Create a new action for object, and restore the old action after context"""
-    old_action = None
+    """Create a new action for object, at last push NLA and restore the old action after context"""
+    old_action = track = strip = None
+    start = 1
     try:
         if not obj:
             obj = bpy.context.active_object
@@ -202,10 +219,28 @@ def new_action(
             obj.animation_data_create()
         if obj.animation_data.action:
             old_action = obj.animation_data.action
+        # Log.debug(f'old_action={old_action}')
         action = obj.animation_data.action = bpy.data.actions.new(name=name)
-        Log.debug(f'old_action={old_action}')
+        if nla_push:
+            # find track that has name==name
+            tracks = [t for t in obj.animation_data.nla_tracks if t.name == name]
+            if len(tracks) > 0:
+                track = tracks[0]
+            else:
+                track = obj.animation_data.nla_tracks.new()
+            track.name = name
+
+            strips = track.strips
+            if len(strips) > 0:
+                start = int(strips[-1].frame_end)
+            Log.debug(f'start={start}, strips={strips}')
+            strip = track.strips.new(name=name, start=start, action=action)
+            # strip.extrapolation = 'HOLD'
+            # strip.blend_type = 'REPLACE'
         yield action
     finally:
+        if nla_push and strip:
+            strip.frame_end = start + action.frame_range[1]
         if old_action and obj and obj.animation_data and obj.animation_data.action:
             obj.animation_data.action = old_action
         else:
@@ -297,7 +332,7 @@ class MotionData(dict):
     def run_keyname(self): return warn_or_return_first(self.runs_keyname)
 
     @property
-    def key_custom(self): return warn_or_return_first(self.keys_custom)
+    def key_custom(self): return self.keys_custom[0]
 
     @property
     def who(self): return warn_or_return_first(self.whos)
