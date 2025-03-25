@@ -155,20 +155,23 @@ def keyframe_add(
     action: 'bpy.types.Action',
     data_path: str,
     at_frame: int,
-    vector: Union[Sequence, Vector],
+    vector: Union[Sequence, Vector, Quaternion, Euler],
 ):
     """
+    also override fcurve if exists
+
     Usage:
     ```python
     insert_frame(action, f'pose.bones["{BODY[i]}"].rotation_quaternion', frame, quat)
     ```
     """
+    fcurves = action.fcurves
     kw = dict(data_path=data_path, index=0)
-    for i, x in enumerate(vector):
+    for i, x in enumerate(vector):  # type: ignore
         kw['index'] = i
-        fcurve = action.fcurves.find(**kw)
+        fcurve = fcurves.find(**kw)  # type: ignore
         if not fcurve:
-            fcurve = action.fcurves.new(**kw)
+            fcurve = fcurves.new(**kw)  # type: ignore
         fcurve.keyframe_points.insert(at_frame, value=x)
     return action
 
@@ -207,7 +210,11 @@ def new_action(
     name='Action',
     nla_push=True,
 ):
-    """Create a new action for object, at last push NLA and restore the old action after context"""
+    """
+    Create a new action for object, at last push NLA and restore the old action after context
+
+    TODO: Support Action Slot when blender 5.0 https://developer.blender.org/docs/release_notes/4.4/upgrading/slotted_actions/
+    """
     old_action = track = strip = None
     start = 1
     try:
@@ -217,12 +224,20 @@ def new_action(
             raise ValueError('No object found')
         if not obj.animation_data:
             obj.animation_data_create()
+        if not obj.animation_data:
+            raise ValueError('No animation data found')
         if obj.animation_data.action:
             old_action = obj.animation_data.action
         # Log.debug(f'old_action={old_action}')
         action = obj.animation_data.action = bpy.data.actions.new(name=name)
+        try:
+            Log.debug(f'action_suitable_slots={obj.animation_data.action_suitable_slots}')
+            slot = action.slots.new(id_type='OBJECT', name=name)
+            obj.animation_data.action_slot = slot
+        except AttributeError:
+            Log.info('skip create action slot because blender < 4.4')
         if nla_push:
-            # find track that has name==name
+            # find track that track.name==name, append behind the last strip of the same track
             tracks = [t for t in obj.animation_data.nla_tracks if t.name == name]
             if len(tracks) > 0:
                 track = tracks[0]
@@ -233,18 +248,20 @@ def new_action(
             strips = track.strips
             if len(strips) > 0:
                 start = int(strips[-1].frame_end)
-            Log.debug(f'start={start}, strips={strips}')
+            # Log.debug(f'start={start}, strips={strips}')
             strip = track.strips.new(name=name, start=start, action=action)
             # strip.extrapolation = 'HOLD'
             # strip.blend_type = 'REPLACE'
         yield action
     finally:
         if nla_push and strip:
-            strip.frame_end = start + action.frame_range[1]
+            Len = action.frame_range[1]
+            strip.action_frame_end = Len
+            # strip.frame_end = start + Len
         if old_action and obj and obj.animation_data and obj.animation_data.action:
             obj.animation_data.action = old_action
         else:
-            Log.warning('No action to restore')
+            Log.info('No action to restore')
 
 
 class MotionData(dict):

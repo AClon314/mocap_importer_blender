@@ -1,5 +1,3 @@
-from curses import KEY_COPY
-from optparse import Option
 from .lib import *
 Log = get_logger(__name__)
 
@@ -99,15 +97,6 @@ def apply_pose(
             keyframe_add(action, f'pose.bones["{bone_name}"].rotation_quaternion', frame, quat)
 
     return action
-
-
-def per_frame(data: MotionData, to_armature, at_frame: int, **kwargs):
-    translation = data(key='trans', coord='global').value[at_frame]  # ['smpl_params_global']['transl'][at_frame]
-    rotate: np.ndarray = data(key='rotate', coord='global').value[at_frame]  # ['smpl_params_global']['global_orient'][at_frame]
-    pose: np.ndarray = data(key='pose', coord='global').value[at_frame]  # ['smpl_params_global']['body_pose'][at_frame]
-    pose = pose.reshape(int(len(pose) / 3), 3)   # (21,3)
-    pose = np.vstack([rotate, pose])  # (22,3)
-    apply_pose(translation, pose, to_armature, at_frame, **kwargs)
 
 
 def gvhmr(
