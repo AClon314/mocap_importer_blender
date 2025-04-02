@@ -31,6 +31,10 @@ LEVEL_PREFIX = {
     logging.CRITICAL: '⛔⛔CRITICAL',
     logging.FATAL: '☠️FATAL',
 }
+try:
+    from warnings import deprecated
+except ImportError:
+    deprecated = lambda *args, **kwargs: lambda func: func
 
 
 def caller_name(skips=8, frame=None):
@@ -76,14 +80,15 @@ def get_logger(name=__name__, level=10):
 
 Log = get_logger(__name__)
 ID = __package__.split('.')[-1] if __package__ else __name__
-
 try:
     from mathutils import Matrix, Vector, Quaternion, Euler
 except ImportError as e:
     Log.warning(e)
-
-TYPE_MotionData_KEY = Literal['pose', 'rotate', 'shape', 'trans']
-MotionData_KEY = get_args(TYPE_MotionData_KEY)
+TYPE_PROP = Literal['body_pose', 'hand_pose', 'global_orient', 'betas', 'transl', 'bbox']
+PROP_KEY = get_args(TYPE_PROP)
+TYPE_ROT = Literal['QUATERNION', 'XYZ', 'YZX', 'ZXY', 'XZY', 'YXZ', 'ZYX', 'AXIS_ANGLE']
+ROT_KEY = get_args(TYPE_ROT)
+def get_major(L: Sequence[T]) -> T | None: return max(L, key=L.count) if L else None
 
 
 def skip_or_in(part, full, pattern=';{};'):
@@ -293,8 +298,8 @@ class MotionData(dict):
         self,
         mapping: Optional[TYPE_MAPPING] = None,
         run: Optional[TYPE_RUN] = None,
-        key: Union[TYPE_MotionData_KEY, str, None] = None,
         who: Union[str, int, None] = None,
+        prop: Optional[TYPE_PROP] = None,
         coord: Optional[Literal['global', 'incam']] = None,
     ):
         # Log.debug(f'self.__dict__={self.__dict__}')
@@ -303,7 +308,7 @@ class MotionData(dict):
             who = f'person{who}'
 
         for k, v in self.items():
-            is_in = [skip_or_in(args, k) for args in [mapping, run, key, who, coord]]
+            is_in = [skip_or_in(args, k) for args in [mapping, run, who, prop, coord]]
             is_in = all(is_in)
             if is_in:
                 D[k] = v
@@ -328,17 +333,15 @@ class MotionData(dict):
 
     @property
     def mappings(self): return self.distinct(0)
-
     @property
     def runs_keyname(self): return self.distinct(1)
+    @property
+    def whos(self): return self.distinct(2)
 
     @property
-    def keys_custom(self):
-        """could return `[your_customkeys, 'pose', 'rotate', 'trans', 'shape']`"""
-        return self.distinct(2)
-
-    @property
-    def whos(self): return self.distinct(3)
+    def props(self):
+        """could return `[your_customkeys, '*_pose', 'global_orient', 'transl', 'betas']`"""
+        return self.distinct(3)
 
     @property
     def coords(self): return self.distinct(4)
@@ -347,13 +350,10 @@ class MotionData(dict):
     def mapping(self): return warn_or_return_first(self.mappings)
     @property
     def run_keyname(self): return warn_or_return_first(self.runs_keyname)
-
     @property
-    def key_custom(self): return self.keys_custom[0]
-
+    def prop(self): return self.props[0]
     @property
     def who(self): return warn_or_return_first(self.whos)
-
     @property
     def coord(self): return warn_or_return_first(self.coords)
 
@@ -366,7 +366,7 @@ class MotionData(dict):
         return warn_or_return_first(self.values())
 
     @property
-    def key(self):
+    def keyname(self):
         """return **FULL** keyname like `smplx;gvhmr;pose;person0;global`, same as:
         ```python
         return self.keys()[0]
@@ -546,10 +546,12 @@ def add_mapping(armature):
 
 
 def apply_motion(person: Union[str, int], mapping: Optional[TYPE_MAPPING], **kwargs):
-    from .gvhmr import gvhmr
     if MOTION_DATA is None:
         raise ValueError('Failed to load motion data')
+    from .run.gvhmr import gvhmr
     gvhmr(MOTION_DATA('smplx', 'gvhmr', who=person), mapping=mapping, **kwargs)
+    from .run.wilor import wilor
+    wilor(MOTION_DATA('smplx', 'wilor', who=person), mapping=mapping, **kwargs)
 
 
 def register():

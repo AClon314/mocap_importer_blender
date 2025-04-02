@@ -1,4 +1,4 @@
-from .lib import *
+from ..lib import *
 Log = get_logger(__name__)
 
 
@@ -33,6 +33,7 @@ def Rodrigues(rot_vec3: np.ndarray) -> np.ndarray:
     return R
 
 
+@deprecated('draft')
 def rodrigues_to_rotates(pose: np.ndarray):
     """
     Parameters
@@ -50,6 +51,7 @@ def rodrigues_to_rotates(pose: np.ndarray):
     return rot_matrixs
 
 
+@deprecated('draft')
 def get_global_pose(global_pose, armature, frame=None):
 
     armature.pose.bones[BODY[0]].rotation_quaternion.w = 0.0
@@ -79,10 +81,15 @@ def apply_pose(
     pose,
     trans,
     frame: int,
+    bone_rot: TYPE_ROT = 'QUATERNION',
     **kwargs
 ):
     """Apply translation, pose, and shape to character using Action and F-Curves."""
-    rots = [Rodrigues(rot) for rot in pose]
+    if bone_rot == 'QUATERNION':
+        rots = [Rodrigues(rot) for rot in pose]
+    else:
+        rots = pose
+
     trans = Vector((trans[0], trans[1], trans[2]))
 
     # Insert translation keyframe
@@ -90,12 +97,13 @@ def apply_pose(
 
     # Insert rotation keyframes for each bone
     for i, rot in enumerate(rots, start=1):  # Skip root!
-        if i <= kwargs.get('ibone', 24):
+        if i <= kwargs.get('ibone', 22):
             bone_name = BODY[i]
-            quat = Matrix(rot).to_quaternion()  # type: ignore
-
-            keyframe_add(action, f'pose.bones["{bone_name}"].rotation_quaternion', frame, quat)
-
+            if bone_rot == 'QUATERNION':
+                rot = Matrix(rot).to_quaternion()  # type: ignore
+                keyframe_add(action, f'pose.bones["{bone_name}"].rotation_quaternion', frame, rot)
+            else:
+                keyframe_add(action, f'pose.bones["{bone_name}"].rotation_euler', frame, rot)
     return action
 
 
@@ -122,6 +130,9 @@ def gvhmr(
     armature = bpy.context.active_object
     if armature is None or armature.type != 'ARMATURE':
         raise ValueError('No armature found')
+    bones_rots: list[TYPE_ROT] = [b.rotation_mode for b in armature.pose.bones]
+    bone_rot = get_major(bones_rots)
+    bone_rot = 'QUATERNION' if not bone_rot else bone_rot
 
     mapping = None if mapping == 'auto' else mapping
     mapping = get_mapping_from_selected_or_objs(mapping)
@@ -129,10 +140,10 @@ def gvhmr(
     BODY = Mod()[mapping].BODY   # type:ignore
 
     data = data(mapping=data.mapping, run='gvhmr')  # type: ignore
-    translation = data(key='trans', coord='global').value
-    rotate = data(key='rotate', coord='global').value
+    translation = data(prop='transl', coord='global').value
+    rotate = data(prop='global_orient', coord='global').value
     rotate = rotate.reshape(-1, 1, 3)
-    pose = data(key='pose', coord='global').value
+    pose = data(prop='body_pose', coord='global').value
     pose = pose.reshape(-1, len(pose[0]) // 3, 3)   # (frames,21,3)
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3)
 
@@ -142,13 +153,10 @@ def gvhmr(
         Log.info(f'range_frame[1] fallback to {range_frame[1]}')
     Range = range(*range_frame)
     # shape = results[character]['betas'].tolist()
-
-    Log.debug(f'armature={armature}')
-
-    with new_action(armature, ';'.join([data.who, data.key_custom, data.run_keyname, data.mapping])) as action:
+    with new_action(armature, ';'.join([data.who, data.run_keyname, data.mapping])) as action:
         for f in Range:
-            print(f'gvhmr {ID}: {f}/{range_frame[1]}\t{f/range_frame[1]*100:.3f}%', end='\r')
-            apply_pose(action, pose[f], translation[f], f, **kwargs)
+            print(f'gvhmr {ID}: {f}/{range_frame[1]}\t{f / range_frame[1] * 100:.3f}%', end='\r')
+            apply_pose(action, pose[f], translation[f], f + 1, bone_rot=bone_rot, **kwargs)
 
     Log.info(f'done')
     del data
