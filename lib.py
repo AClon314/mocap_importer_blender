@@ -11,7 +11,7 @@ import importlib
 import numpy as np
 from contextlib import contextmanager
 from types import ModuleType
-from typing import Dict, List, Optional, Sequence, Union, Literal, TypeVar, get_args
+from typing import Any, Dict, List, Optional, Sequence, Union, Literal, TypeVar, get_args
 DIR_SELF = os.path.dirname(__file__)
 DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
 MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
@@ -585,7 +585,7 @@ def check_before_run(
     BONES = getattr(Map()[mapping], key, 'BODY')   # type:ignore
 
     if is_range and Range[1] is None:
-        Range[1] = len(data(prop='transl', coord='global').value)  # type: ignore
+        Range[1] = len(data(prop='global_orient').value)    # TODO: use data.frames
         Log.info(f'range_frame[1] fallback to {Range[1]}')
     _Range = range(*Range)
     str_map = f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping
@@ -879,28 +879,32 @@ def quat_rotAxis(arr: TN) -> TN: return RotMat_to_quat(Rodrigues(arr))
 def apply_pose(
     action: 'bpy.types.Action',
     pose,
-    trans,
     frame: int,
     bones: Sequence[str],
+    trans: Optional[Any] = None,
     bone_rot: TYPE_ROT = 'QUATERNION',
     **kwargs
 ):
     """Apply translation, pose, and shape to character using Action and F-Curves."""
-    method = str(kwargs.get('quat', 'r'))[0]
+    method = str(kwargs.get('quat', 0))[0]
     if bone_rot == 'QUATERNION':
-        if method == 'r':
+        if method == 'a':  # axis
             rots = quat_rotAxis(pose)
+        elif method == 'r':  # raw
+            rots = pose
         else:
             rots = quat(pose)
     else:
         rots = euler(pose)
 
+    start = 0
     if trans is not None:
         trans = Vector((trans[0], trans[1], trans[2]))
         add_keyframe(action, f'pose.bones["{bones[0]}"].location', frame, trans)
+        start = 1
 
     # Insert rotation keyframes for each bone
-    for i, rot in enumerate(rots, start=1):  # Skip root!
+    for i, rot in enumerate(rots, start=start):  # Skip root!
         bone_name = bones[i]
         if bone_rot == 'QUATERNION':
             add_keyframe(action, f'pose.bones["{bone_name}"].rotation_quaternion', frame, rot)

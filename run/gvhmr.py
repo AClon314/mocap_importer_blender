@@ -56,6 +56,6 @@ def gvhmr(
     with new_action(armature, ';'.join([data.who, data.run_keyname])) as action:
         for f in _Range:
             # print(f'gvhmr {ID}: {f}/{range_frame[1]}\t{f / range_frame[1] * 100:.3f}%', end='\r')
-            apply_pose(action, pose[f], translation[f], f + 1, bones=BODY, bone_rot=bone_rot, **kwargs)
+            apply_pose(action=action, pose=pose[f], trans=translation[f], frame=f + 1, bones=BODY, bone_rot=bone_rot, **kwargs)
 
     Log.info(f'done')

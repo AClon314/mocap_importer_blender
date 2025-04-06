@@ -20,17 +20,16 @@ def wilor(
     wilor(data('smplx', 'wilor', person=0))
     ```
     """
-    data, armature, bone_rot, HAND, _Range, str_map = check_before_run('wilor', 'HANDS', data, Range, mapping)
+    data, armature, bone_rot, HAND, _Range = check_before_run('wilor', 'HANDS', data, Range, mapping)
 
-    translation = data(prop='transl').value
-    rotate = data(prop='global_orient').value
-    rotate = rotate.reshape(-1, 1, rotate.shape[-1])
+    # rotate = data(prop='global_orient').value
+    # rotate = rotate.reshape(-1, 1, rotate.shape[-1])
     pose = data(prop='hand_pose').value
-    pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3|4)
+    # pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3|4)
 
-    with new_action(armature, ';'.join([data.who, str_map, data.run_keyname])) as action:
+    with new_action(armature, ';'.join([data.who, data.run_keyname])) as action:
         for f in _Range:
             # print(f'wilor {ID}: {f}/{range_frame[1]}\t{f / range_frame[1] * 100:.3f}%', end='\r')
-            apply_pose(action, pose[f], translation[f], f + 1, bones=HAND, bone_rot=bone_rot, **kwargs)
+            apply_pose(action=action, pose=pose[f], frame=f + 1, bones=HAND, bone_rot=bone_rot, **kwargs)
 
     Log.info(f'done')
