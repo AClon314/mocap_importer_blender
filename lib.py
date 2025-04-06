@@ -482,8 +482,8 @@ def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> Union[TYPE_MAPPIN
     keys = keys_BFS(bones)
     mapping = None
     max_similar = 0
-    for map, run in Map().items():
-        similar = get_similar(keys, run.BONES)
+    for map, mod in Map().items():
+        similar = get_similar(keys, mod.BONES)
         if similar > max_similar:
             max_similar = similar
             mapping = map
@@ -567,7 +567,7 @@ def check_before_run(
     Usage:
     ```python
     global BODY
-    data, armature, bone_rot, BODY, _Range, str_map = check_before_run('gvhmr','BODY', data, Range, mapping)
+    data, armature, bone_rot, BODY, _Range = check_before_run('gvhmr','BODY', data, Range, mapping)
     ```
     """
     data = data(mapping=data.mapping, run=run)  # type: ignore
@@ -589,20 +589,18 @@ def check_before_run(
         Log.info(f'range_frame[1] fallback to {Range[1]}')
     _Range = range(*Range)
     str_map = f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping
-    return data, armature, bone_rot, BONES, _Range, str_map
+    Log.info(f'mapping from {str_map}')
+    return data, armature, bone_rot, BONES, _Range
 
 
 def apply(who: Union[str, int], mapping: Optional[TYPE_MAPPING], **kwargs):
     global MOTION_DATA
     if MOTION_DATA is None:
         raise ValueError('Failed to load motion data')
-    for r in MOTION_DATA.runs_keyname:
-        try:
-            run = getattr(Run()[r], r)
-            run(MOTION_DATA('smplx', r, who=who), mapping=mapping, **kwargs)
-        except Exception as e:
-            Log.error(f'{run} for {who}: {e}')
-            continue
+    data = MOTION_DATA(mapping='smplx', who=who)
+    for r in data.runs_keyname:
+        run = getattr(Run()[r], r)
+        run(data, mapping=mapping, **kwargs)
 
 
 def Axis(is_torch=False): return 'dim' if is_torch else 'axis'
@@ -897,19 +895,17 @@ def apply_pose(
     else:
         rots = euler(pose)
 
-    trans = Vector((trans[0], trans[1], trans[2]))
-
-    # Insert translation keyframe
-    add_keyframe(action, f'pose.bones["{bones[0]}"].location', frame, trans)
+    if trans is not None:
+        trans = Vector((trans[0], trans[1], trans[2]))
+        add_keyframe(action, f'pose.bones["{bones[0]}"].location', frame, trans)
 
     # Insert rotation keyframes for each bone
     for i, rot in enumerate(rots, start=1):  # Skip root!
-        if i <= kwargs.get('ibone', 22):
-            bone_name = bones[i]
-            if bone_rot == 'QUATERNION':
-                add_keyframe(action, f'pose.bones["{bone_name}"].rotation_quaternion', frame, rot)
-            else:
-                add_keyframe(action, f'pose.bones["{bone_name}"].rotation_euler', frame, rot)
+        bone_name = bones[i]
+        if bone_rot == 'QUATERNION':
+            add_keyframe(action, f'pose.bones["{bone_name}"].rotation_quaternion', frame, rot)
+        else:
+            add_keyframe(action, f'pose.bones["{bone_name}"].rotation_euler', frame, rot)
     return action
 
 

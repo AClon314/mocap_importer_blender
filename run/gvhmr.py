@@ -45,7 +45,7 @@ def gvhmr(
     gvhmr(data('smplx', 'gvhmr', person=0))
     ```
     """
-    data, armature, bone_rot, BODY, _Range, str_map = check_before_run('gvhmr', 'BODY', data, Range, mapping)
+    data, armature, bone_rot, BODY, _Range = check_before_run('gvhmr', 'BODY', data, Range, mapping)
 
     translation = data(prop='transl', coord='global').value
     rotate = data(prop='global_orient', coord='global').value
@@ -53,7 +53,7 @@ def gvhmr(
     pose = data(prop='body_pose', coord='global').value
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3|4)
 
-    with new_action(armature, ';'.join([data.who, str_map, data.run_keyname])) as action:
+    with new_action(armature, ';'.join([data.who, data.run_keyname])) as action:
         for f in _Range:
             # print(f'gvhmr {ID}: {f}/{range_frame[1]}\t{f / range_frame[1] * 100:.3f}%', end='\r')
             apply_pose(action, pose[f], translation[f], f + 1, bones=BODY, bone_rot=bone_rot, **kwargs)
