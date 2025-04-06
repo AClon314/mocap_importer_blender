@@ -4,11 +4,11 @@ import bpy
 import traceback
 from typing import Callable
 try:
-    from .lib import DIR_MAPPING, get_logger, items_mapping, dump_bones, keys_BFS, load_data, add_mapping, apply_motion, items_motions
+    from .lib import DIR_MAPPING, getLogger, items_mapping, dump_bones, keys_BFS, load_data, add_mapping, apply, items_motions
 except ImportError as e:
     print(f'ui ⚠️ {e}')
     from lib import *
-Log = get_logger(__name__)
+Log = getLogger(__name__)
 BL_ID = 'MOCAP_PT_Panel'
 BL_CATAGORY = 'SMPL-X'
 BL_SPACE = 'VIEW_3D'
@@ -39,13 +39,13 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
     input_video: bpy.props.StringProperty(
         name='Input',
         description='Video',
-        default='./input.mp4',
+        default='input.mp4',
         subtype='FILE_PATH',
     )  # type: ignore
     input_npz: bpy.props.StringProperty(
         name='npz',
         description='gvhmr/wilor ouput .npz file, generated from mocap_wrapper',
-        default='./mocap_example.npz',
+        default='mocap_example.npz',
         subtype='FILE_PATH',
         update=load_data,
     )  # type: ignore
@@ -81,6 +81,11 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         max=24,
         step=1,
     )  # type: ignore
+    debug_kwargs: bpy.props.StringProperty(
+        name='kwargs',
+        description='kwargs for debug',
+        default="quat=0",
+    )   # type: ignore
 
 
 class DefaultPanel:
@@ -134,6 +139,8 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
         row.prop(props, 'ibone')
         row = layout.row()
         row.operator('armature.get_bones_info', icon='BONE_DATA')
+        row = layout.row()
+        row.prop(props, 'debug_kwargs')
 
 
 class RUN_PT_Panel(DefaultPanel, bpy.types.Panel):
@@ -157,7 +164,8 @@ class LoadMocap_Operator(bpy.types.Operator):
         props = Props(context)
         input_npz = props.input_npz
         mapping = None if props.mapping == 'Auto detect' else props.mapping
-        apply_motion(props.motions, mapping=mapping, ibone=props.ibone + 1)
+        kwargs = eval(f'dict({props.debug_kwargs})')
+        apply(props.motions, mapping=mapping, ibone=props.ibone + 1, **kwargs)
         return {'FINISHED'}
 
 

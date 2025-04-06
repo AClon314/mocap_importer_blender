@@ -4,6 +4,7 @@ https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blende
 import os
 import re
 import bpy
+import sys
 import logging
 import inspect
 import importlib
@@ -22,6 +23,7 @@ TYPE_I18N = Literal[  # blender 4.3.2
     'ab', 'ar_EG', 'be', 'bg_BG', 'cs_CZ', 'da', 'el_GR', 'eo', 'eu_EU', 'fa_IR', 'fi_FI', 'ha', 'he_IL', 'hi_IN', 'hr_HR', 'hu_HU', 'id_ID', 'km', 'ky_KG', 'lt', 'ne_NP', 'nl_NL', 'pl_PL', 'ro_RO', 'sl', 'sr_RS', 'sr_RS@latin', 'sv_SE', 'th_TH'
 ]
 T = TypeVar('T')
+TN = np.ndarray
 MOTION_DATA = None
 LEVEL_PREFIX = {
     logging.DEBUG: '🐛DEBUG',
@@ -55,9 +57,9 @@ def caller_name(skips=8, frame=None):
     return ''
 
 
-def get_logger(name=__name__, level=10):
+def getLogger(name=__name__, level=10):
     """```python
-    Log = get_logger(__name__)
+    Log = getLogger(__name__)
     ```"""
     Log = logging.getLogger(name)
     Log.setLevel(level)
@@ -78,7 +80,7 @@ def get_logger(name=__name__, level=10):
     return Log
 
 
-Log = get_logger(__name__)
+Log = getLogger(__name__)
 ID = __package__.split('.')[-1] if __package__ else __name__
 try:
     from mathutils import Matrix, Vector, Quaternion, Euler
@@ -107,24 +109,28 @@ def warn_or_return_first(L: List[T]) -> T:
     return L[0]
 
 
-def Mod():
-    files = os.listdir(DIR_MAPPING)
+def Mod(Dir='mapping'):
+    files = os.listdir(os.path.join(DIR_SELF, Dir))
     pys = []
-    mods: Dict[TYPE_MAPPING, ModuleType] = {}
+    mods: Dict[str, ModuleType] = {}
     for f in files:
         if f.endswith('.py') and f not in ['template.py', '__init__.py']:
             pys.append(f[:-3])
     for p in pys:
-        mod = importlib.import_module(f'.mapping.{p}', package=__package__)
+        mod = importlib.import_module(f'.{Dir}.{p}', package=__package__)
         mods.update({p: mod})
     return mods
+
+
+def Map(Dir='mapping'): return Mod(Dir=Dir)
+def Run(Dir='run'): return Mod(Dir=Dir)
 
 
 def items_mapping(self=None, context=None):
     items: List[tuple[str, str, str]] = [(
         'auto', 'Auto',
         'Auto detect armature type, based on name (will enhanced in later version)')]
-    for k, m in Mod().items():
+    for k, m in Map().items():
         help = ''
         try:
             help = m.HELP[bpy.app.translations.locale]
@@ -156,7 +162,7 @@ def load_data(self=None, context=None):
     MOTION_DATA = MotionData(npz=file)
 
 
-def keyframe_add(
+def add_keyframe(
     action: 'bpy.types.Action',
     data_path: str,
     at_frame: int,
@@ -270,6 +276,13 @@ def new_action(
 
 
 class MotionData(dict):
+    """
+    usage:
+    ```python
+    data(mapping='smplx', run='gvhmr', key='trans', coord='global').values()[0]
+    ```
+    """
+
     def keys(self) -> List[str]:
         return list(super().keys())
 
@@ -282,11 +295,6 @@ class MotionData(dict):
         Args:
             npz (str, Path, optional): npz file path.
             lazy (bool, optional): if True, do NOT load npz file.
-
-        usage:
-        ```python
-        data(mapping='smplx', run='gvhmr', key='trans', coord='global').values()[0]
-        ```
         """
         super().__init__(*args, **kwargs)
         if npz:
@@ -474,8 +482,8 @@ def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> Union[TYPE_MAPPIN
     keys = keys_BFS(bones)
     mapping = None
     max_similar = 0
-    for map, mod in Mod().items():
-        similar = get_similar(keys, mod.BONES)
+    for map, run in Map().items():
+        similar = get_similar(keys, run.BONES)
         if similar > max_similar:
             max_similar = similar
             mapping = map
@@ -501,7 +509,8 @@ def get_mapping_from_selected_or_objs(mapping: Union[TYPE_MAPPING, None] = None)
                     mapping = guess_obj_mapping(obj)
                     if mapping:
                         break
-            raise ValueError(f'Unknown mapping: {mapping}')
+    if mapping is None:
+        raise ValueError(f'Unknown mapping: {mapping}, try to select/add new mapping to')
     return mapping
 
 
@@ -516,7 +525,7 @@ def add_mapping(armature):
     bones_tree = dump_bones(armature)
     bones = keys_BFS(bones_tree)
     map = {}
-    for x, my in zip(Mod()['smplx'].BONES, bones, strict=False):
+    for x, my in zip(Map()['smplx'].BONES, bones, strict=False):
         map[x] = my
 
     t = ''
@@ -536,7 +545,7 @@ def add_mapping(armature):
     t = re.sub(r'」', '}', t)
 
     filename = f'{armature.name}.py'
-    file = os.path.join(DIR_MAPPING, filename)
+    file: str = os.path.join(DIR_MAPPING, filename)
     if os.path.exists(file):
         raise FileExistsError(f'Mapping exists: {file}')
     else:
@@ -545,13 +554,363 @@ def add_mapping(armature):
     Log.info(f'Restart addon to update mapping:  {file}')
 
 
-def apply_motion(person: Union[str, int], mapping: Optional[TYPE_MAPPING], **kwargs):
+def check_before_run(
+    run: TYPE_RUN,
+    key: str,
+    data: MotionData,
+    Range: list,
+    mapping: Optional[TYPE_MAPPING] = None
+):
+    """
+    guess mapping[smpl,smplx]/Range_end/bone_rotation_mode[eular,quat]
+
+    Usage:
+    ```python
+    global BODY
+    data, armature, bone_rot, BODY, _Range, str_map = check_before_run('gvhmr','BODY', data, Range, mapping)
+    ```
+    """
+    data = data(mapping=data.mapping, run=run)  # type: ignore
+    is_range = len(Range) > 1
+
+    armature = bpy.context.active_object
+    if armature is None or armature.type != 'ARMATURE':
+        raise ValueError('No armature found')
+    bones_rots: list[TYPE_ROT] = [b.rotation_mode for b in armature.pose.bones]
+    bone_rot = get_major(bones_rots)
+    bone_rot = 'QUATERNION' if not bone_rot else bone_rot
+
+    mapping = None if mapping == 'auto' else mapping
+    mapping = get_mapping_from_selected_or_objs(mapping)
+    BONES = getattr(Map()[mapping], key, 'BODY')   # type:ignore
+
+    if is_range and Range[1] is None:
+        Range[1] = len(data(prop='transl', coord='global').value)  # type: ignore
+        Log.info(f'range_frame[1] fallback to {Range[1]}')
+    _Range = range(*Range)
+    str_map = f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping
+    return data, armature, bone_rot, BONES, _Range, str_map
+
+
+def apply(who: Union[str, int], mapping: Optional[TYPE_MAPPING], **kwargs):
+    global MOTION_DATA
     if MOTION_DATA is None:
         raise ValueError('Failed to load motion data')
-    from .run.gvhmr import gvhmr
-    gvhmr(MOTION_DATA('smplx', 'gvhmr', who=person), mapping=mapping, **kwargs)
-    from .run.wilor import wilor
-    wilor(MOTION_DATA('smplx', 'wilor', who=person), mapping=mapping, **kwargs)
+    for r in MOTION_DATA.runs_keyname:
+        try:
+            run = getattr(Run()[r], r)
+            run(MOTION_DATA('smplx', r, who=who), mapping=mapping, **kwargs)
+        except Exception as e:
+            Log.error(f'{run} for {who}: {e}')
+            continue
+
+
+def Axis(is_torch=False): return 'dim' if is_torch else 'axis'
+
+
+@deprecated('use `quat_rotAxis` instead')
+def quat(xyz: TN) -> TN:
+    """euler to quat
+    Args:
+        arr (TN): 输入张量/数组，shape为(...,3)，对应[roll, pitch, yaw]（弧度）
+    Returns:
+        quat: normalized [w,x,y,z], shape==(...,4)
+    """
+    if xyz.shape[-1] == 4:
+        return xyz
+    assert xyz.shape[-1] == 3, f"Last dimension should be 3, but found {xyz.shape}"
+    lib = Lib(xyz)  # 自动检测库类型
+    is_torch = lib.__name__ == 'torch'
+
+    # 计算半角三角函数（支持广播）
+    half_angles = 0.5 * xyz
+    cos_half = lib.cos(half_angles)  # shape (...,3)
+    sin_half = lib.sin(half_angles)
+
+    # 分库处理维度解包
+    if is_torch:
+        cr, cp, cy = cos_half.unbind(dim=-1)
+        sr, sp, sy = sin_half.unbind(dim=-1)
+    else:  # NumPy处理
+        cr, cp, cy = cos_half[..., 0], cos_half[..., 1], cos_half[..., 2]
+        sr, sp, sy = sin_half[..., 0], sin_half[..., 1], sin_half[..., 2]
+
+    # 并行计算四元数分量（保持维度）
+    w = cr * cp * cy + sr * sp * sy
+    x = sr * cp * cy - cr * sp * sy
+    y = cr * sp * cy + sr * cp * sy
+    z = cr * cp * sy - sr * sp * cy
+
+    # 堆叠并归一化
+    _quat = lib.stack([w, x, y, z], **{Axis(is_torch): -1})
+    _quat /= Norm(_quat)
+    return _quat
+
+
+def euler(wxyz: TN) -> TN:
+    """union quat to euler
+    Args:
+        quat (TN): [w,x,y,z], shape==(...,4)
+    Returns:
+        euler: [roll_x, pitch_y, yaw_z] in arc system, shape==(...,3)
+    """
+    if wxyz.shape[-1] == 3:
+        return wxyz
+    assert wxyz.shape[-1] == 4, f"Last dimension should be 4, but found {wxyz.shape}"
+    lib = Lib(wxyz)  # 自动检测库类型
+    is_torch = lib.__name__ == 'torch'
+    EPSILON = 1e-12  # 数值稳定系数
+
+    # 归一化四元数（防止输入未归一化）
+    wxyz = wxyz / Norm(wxyz, dim=-1, keepdim=True)  # type: ignore
+
+    # 解包四元数分量（支持广播）
+    w, x, y, z = wxyz[..., 0], wxyz[..., 1], wxyz[..., 2], wxyz[..., 3]
+
+    # 计算roll (x轴旋转)
+    sinr_cosp = 2 * (w * x + y * z)
+    cosr_cosp = 1 - 2 * (x**2 + y**2)
+    roll = lib.arctan2(sinr_cosp, cosr_cosp + EPSILON)  # 防止除零
+
+    # 计算pitch (y轴旋转)
+    sinp = 2 * (w * y - z * x)
+    pitch = lib.arcsin(sinp.clip(-1.0, 1.0))  # 限制在有效范围内
+
+    # 计算yaw (z轴旋转)
+    siny_cosp = 2 * (w * z + x * y)
+    cosy_cosp = 1 - 2 * (y**2 + z**2)
+    yaw = lib.arctan2(siny_cosp, cosy_cosp + EPSILON)
+
+    # 堆叠结果
+    _euler = lib.stack([roll, pitch, yaw], **{Axis(is_torch): -1})
+    return _euler
+
+
+def get_mod(mod1: ModuleType | str):
+    if isinstance(mod1, str):
+        _mod1 = sys.modules.get(mod1, None)
+    else:
+        _mod1 = mod1
+    return _mod1
+
+
+def Lib(arr, mod1: ModuleType | str = np, mod2: ModuleType | str = 'torch', ret_1_if=np.ndarray):
+    """usage:
+    ```python
+    lib = Lib(arr)
+    is_torch = lib.__name__ == 'torch'
+    ```
+    """
+    _mod1 = get_mod(mod1)
+    _mod2 = get_mod(mod2)
+    if _mod1 and _mod2:
+        mod = _mod1 if isinstance(arr, ret_1_if) else _mod2
+    elif _mod1:
+        mod = _mod1
+    elif _mod2:
+        mod = _mod2
+    else:
+        raise ImportError("Both libraries are not available.")
+    # Log.debug(f"🔍 {mod.__name__}")
+    return mod
+
+
+def Norm(arr: TN, dim: int = -1, keepdim: bool = True) -> TN:
+    """计算范数，支持批量输入"""
+    lib = Lib(arr)
+    is_torch = lib.__name__ == 'torch'
+    if is_torch:
+        return lib.norm(arr, dim=dim, keepdim=keepdim)
+    else:
+        return lib.linalg.norm(arr, axis=dim, keepdims=keepdim)
+
+
+def skew_symmetric(v: TN) -> TN:
+    """生成反对称矩阵，支持批量输入"""
+    lib = Lib(v)
+    is_torch = lib.__name__ == 'torch'
+    axis = Axis(is_torch)
+    axis_1 = {axis: -1}
+    # 创建各分量
+    zeros = lib.zeros_like(v[..., 0])  # 形状 (...)
+    row0 = lib.stack([zeros, -v[..., 2], v[..., 1]], **axis_1)  # (...,3)
+    row1 = lib.stack([v[..., 2], zeros, -v[..., 0]], **axis_1)
+    row2 = lib.stack([-v[..., 1], v[..., 0], zeros], **axis_1)
+    # 堆叠为矩阵
+    if is_torch:
+        return lib.stack([row0, row1, row2], dim=-2)
+    else:
+        return lib.stack([row0, row1, row2], axis=-2)  # (...,3,3)
+
+
+def Rodrigues(rot_vec3: TN) -> TN:
+    """
+    支持批量处理的罗德里格斯公式
+
+    Parameters
+    ----------
+    rotvec : np.ndarray
+        3D rotation vector
+
+    Returns
+    -------
+    np.ndarray
+        3x3 rotation matrix
+
+    _R: np.ndarray = np.eye(3) + sin * K + (1 - cos) * K @ K  # 原式
+    choose (3,1) instead 3:    3 is vec, k.T == k;    (3,1) is matrix, k.T != k
+    """
+    if rot_vec3.shape[-1] == 4:
+        return rot_vec3
+    assert rot_vec3.shape[-1] == 3, f"Last dimension must be 3, but got {rot_vec3.shape}"
+    lib = Lib(rot_vec3)
+    is_torch = lib.__name__ == 'torch'
+
+    # 计算旋转角度
+    theta = Norm(rot_vec3, dim=-1, keepdim=True)  # (...,1)
+
+    EPSILON = 1e-8
+    mask = theta < EPSILON
+
+    # 处理小角度情况
+    K_small = skew_symmetric(rot_vec3)
+    eye = lib.eye(3, dtype=rot_vec3.dtype)
+    if is_torch:
+        eye = eye.to(rot_vec3.device)
+    R_small = eye + K_small  # 广播加法
+
+    # 处理一般情况
+    safe_theta = lib.where(mask, EPSILON * lib.ones_like(theta), theta)  # 避免除零
+    k = rot_vec3 / safe_theta  # 单位向量
+
+    K = skew_symmetric(k)
+    k = k[..., None]  # 添加最后维度 (...,3,1)
+    kkt = lib.matmul(k, lib.swapaxes(k, -1, -2))  # (...,3,3)
+
+    cos_t = lib.cos(theta)[..., None]  # (...,1,1)
+    sin_t = lib.sin(theta)[..., None]
+
+    R_full = cos_t * eye + sin_t * K + (1 - cos_t) * kkt
+
+    # 合并结果
+    if is_torch:
+        mask = mask.view(*mask.shape, 1, 1)
+    else:
+        mask = mask[..., None]
+
+    ret = lib.where(mask, R_small, R_full)
+    return ret
+
+
+def RotMat_to_quat(R: TN) -> TN:
+    """将3x3旋转矩阵转换为单位四元数 [w, x, y, z]，支持批量和PyTorch/NumPy"""
+    if R.shape[-1] == 4:
+        return R
+    assert R.shape[-2:] == (3, 3), f"输入R的末两维必须为3x3，当前为{R.shape}"
+    lib = Lib(R)  # 自动检测模块
+    is_torch = lib.__name__ == 'torch'
+    EPSILON = 1e-12  # 数值稳定系数
+
+    # 计算迹，形状为(...)
+    trace = lib.einsum('...ii->...', R)
+
+    # 计算四个分量的平方（带数值稳定处理）
+    q_sq = lib.stack([
+        (trace + 1) / 4,
+        (1 + 2 * R[..., 0, 0] - trace) / 4,
+        (1 + 2 * R[..., 1, 1] - trace) / 4,
+        (1 + 2 * R[..., 2, 2] - trace) / 4,
+    ], axis=-1)
+
+    q_sq = lib.maximum(q_sq, 0.0)  # 确保平方值非负
+
+    # 找到最大分量的索引，形状(...)
+    i = lib.argmax(q_sq, axis=-1)
+
+    # 计算分母（带数值稳定处理）
+    denoms = 4 * lib.sqrt(q_sq + EPSILON)  # 添加极小值防止sqrt(0)
+
+    # 构造每个case的四元数分量
+    cases = []
+    for i_case in range(4):
+        denom = denoms[..., i_case]  # 当前case的分母
+        if i_case == 0:
+            w = lib.sqrt(q_sq[..., 0] + EPSILON)  # 数值稳定
+            x = (R[..., 2, 1] - R[..., 1, 2]) / denom
+            y = (R[..., 0, 2] - R[..., 2, 0]) / denom
+            z = (R[..., 1, 0] - R[..., 0, 1]) / denom
+        elif i_case == 1:
+            x = lib.sqrt(q_sq[..., 1] + EPSILON)
+            w = (R[..., 2, 1] - R[..., 1, 2]) / denom
+            y = (R[..., 0, 1] + R[..., 1, 0]) / denom
+            z = (R[..., 0, 2] + R[..., 2, 0]) / denom
+        elif i_case == 2:
+            y = lib.sqrt(q_sq[..., 2] + EPSILON)
+            w = (R[..., 0, 2] - R[..., 2, 0]) / denom
+            x = (R[..., 0, 1] + R[..., 1, 0]) / denom
+            z = (R[..., 1, 2] + R[..., 2, 1]) / denom
+        else:  # i_case == 3
+            z = lib.sqrt(q_sq[..., 3] + EPSILON)
+            w = (R[..., 1, 0] - R[..., 0, 1]) / denom
+            x = (R[..., 0, 2] + R[..., 2, 0]) / denom
+            y = (R[..., 1, 2] + R[..., 2, 1]) / denom
+
+        case = lib.stack([w, x, y, z], axis=-1)
+        cases.append(case)
+
+    # 合并所有情况并进行索引选择
+    cases = lib.stack(cases, axis=0)
+    if is_torch:
+        index = i.reshape(1, *i.shape, 1).expand(1, *i.shape, 4)
+        q = lib.gather(cases, dim=0, index=index).squeeze(0)
+    else:
+        # 构造NumPy兼容的索引
+        index = i.reshape(1, *i.shape, 1)  # 添加新轴以对齐批量维度
+        index = np.broadcast_to(index, (1,) + i.shape + (4,))  # 扩展至四元数维度
+        q = np.take_along_axis(cases, index, axis=0).squeeze(0)  # 选择并压缩维度
+
+    # 归一化处理（带数值稳定）
+    norm = Norm(q, dim=-1, keepdim=True)
+    ret = q / (norm + EPSILON)  # 防止除零
+    return ret
+
+
+def quat_rotAxis(arr: TN) -> TN: return RotMat_to_quat(Rodrigues(arr))
+
+
+def apply_pose(
+    action: 'bpy.types.Action',
+    pose,
+    trans,
+    frame: int,
+    bones: Sequence[str],
+    bone_rot: TYPE_ROT = 'QUATERNION',
+    **kwargs
+):
+    """Apply translation, pose, and shape to character using Action and F-Curves."""
+    method = str(kwargs.get('quat', 'r'))[0]
+    if bone_rot == 'QUATERNION':
+        if method == 'r':
+            rots = quat_rotAxis(pose)
+        else:
+            rots = quat(pose)
+    else:
+        rots = euler(pose)
+
+    trans = Vector((trans[0], trans[1], trans[2]))
+
+    # Insert translation keyframe
+    add_keyframe(action, f'pose.bones["{bones[0]}"].location', frame, trans)
+
+    # Insert rotation keyframes for each bone
+    for i, rot in enumerate(rots, start=1):  # Skip root!
+        if i <= kwargs.get('ibone', 22):
+            bone_name = bones[i]
+            if bone_rot == 'QUATERNION':
+                add_keyframe(action, f'pose.bones["{bone_name}"].rotation_quaternion', frame, rot)
+            else:
+                add_keyframe(action, f'pose.bones["{bone_name}"].rotation_euler', frame, rot)
+    return action
 
 
 def register():
@@ -565,10 +924,6 @@ def unregister():
 if __name__ == "__main__":
     # debug
     try:
-        data = MotionData(npz='/home/n/document/code/GVHMR/output/demo/jumper/mocap_jumper.npz')
-        print(data(mapping='smplx', run='gvhmr', key='trans', coord='global').values()[0])
-        # from mapping.smplx import *
-        # ret = keys_BFS(BONES_TREE)
-        # print(ret)
+        ...
     except ImportError:
         ...
