@@ -5,10 +5,9 @@ import os
 import re
 import bpy
 import sys
-import logging
-import inspect
 import importlib
 import numpy as np
+from .logger import getLogger
 from contextlib import contextmanager
 from types import ModuleType
 from typing import Any, Dict, List, Optional, Sequence, Union, Literal, TypeVar, get_args
@@ -25,63 +24,9 @@ TYPE_I18N = Literal[  # blender 4.3.2
 T = TypeVar('T')
 TN = np.ndarray
 MOTION_DATA = None
-LEVEL_PREFIX = {
-    logging.DEBUG: '🐛DEBUG',
-    logging.INFO: '💬 INFO',
-    logging.WARNING: '⚠️  WARN',
-    logging.ERROR: '❌ERROR',
-    logging.CRITICAL: '⛔⛔CRITICAL',
-    logging.FATAL: '☠️FATAL',
-}
-try:
-    from warnings import deprecated
-except ImportError:
-    deprecated = lambda *args, **kwargs: lambda func: func
-
-
-def caller_name(skips=8, frame=None):
-    """skip: ['caller_name', 'format', 'emit', 'handle', 'callHandlers', '_log', 'debug', 'info', 'warning', 'error', 'critical', 'fatal']"""
-    if frame is None:
-        frame = inspect.currentframe()
-    while frame:
-        if skips >= 0:
-            skips -= 1
-            frame = frame.f_back
-            continue
-        name = frame.f_code.co_name + '()'
-        parent = frame.f_back
-        name_parent = ''
-        if parent:
-            name_parent = '←' + parent.f_code.co_name + '()'
-        return name + name_parent
-    return ''
-
-
-def getLogger(name=__name__, level=10):
-    """```python
-    Log = getLogger(__name__)
-    ```"""
-    Log = logging.getLogger(name)
-    Log.setLevel(level)
-    Log.propagate = False   # disable propagate to root logger
-    stream_handler = logging.StreamHandler()
-
-    class CustomFormatter(logging.Formatter):
-        def format(self, record):
-            record.levelname = LEVEL_PREFIX.get(record.levelno, record.levelname)
-            record.msg = f'{record.msg}\t{caller_name()}'
-            return super().format(record)
-
-    stream_handler.setFormatter(
-        CustomFormatter(
-            '%(levelname)s\t%(asctime)s  %(message)s\t%(name)s:%(lineno)d',
-            datefmt='%H:%M:%S'))
-    Log.addHandler(stream_handler)
-    return Log
 
 
 Log = getLogger(__name__)
-ID = __package__.split('.')[-1] if __package__ else __name__
 try:
     from mathutils import Matrix, Vector, Quaternion, Euler
 except ImportError as e:
@@ -93,7 +38,7 @@ ROT_KEY = get_args(TYPE_ROT)
 def get_major(L: Sequence[T]) -> T | None: return max(L, key=L.count) if L else None
 
 
-def skip_or_in(part, full, pattern=';{};'):
+def in_or_skip(part, full, pattern=''):
     """used in class `MotionData`"""
     if pattern:
         part = pattern.format(part) if part else None
@@ -122,8 +67,8 @@ def Mod(Dir='mapping'):
     return mods
 
 
-def Map(Dir='mapping'): return Mod(Dir=Dir)
-def Run(Dir='run'): return Mod(Dir=Dir)
+def Map(Dir='mapping') -> Dict[Union[TYPE_MAPPING, str], ModuleType]: return Mod(Dir=Dir)
+def Run(Dir='run') -> Dict[Union[TYPE_RUN, str], ModuleType]: return Mod(Dir=Dir)
 
 
 def items_mapping(self=None, context=None):
@@ -143,13 +88,9 @@ def items_mapping(self=None, context=None):
 
 def items_motions(self=None, context=None):
     items: List[tuple[str, str, str]] = []
-    if MOTION_DATA is None:
-        load_data()
     if MOTION_DATA is not None:
         for k in MOTION_DATA.whos:
             items.append((k, k, ''))
-    else:
-        raise ValueError('Failed to load motion data')
     return items
 
 
@@ -187,32 +128,45 @@ def add_keyframe(
     return action
 
 
-def context_override(area='NLA_EDITOR'):
+@contextmanager
+def temp_override(area='NLA_EDITOR', mode: Literal['global', 'current'] = 'current'):
     """
     Not recommended to use, all **`bpy.ops`** are **slower** than **pure data** manipulation.
 
     usage:
     ```python
-    with bpy.context.temp_override(**context_override()):
+    with bpy.context.temp_override(**temp_override()):
         bpy.ops.nla.action_pushdown(override)
     ```
     """
-    win = bpy.context.window
-    scr = win.screen
-    areas = [a for a in scr.areas if a.type == area]
-    if not areas:
-        raise RuntimeError(f"No area of type '{area}' found in the current screen.")
-    region = areas[0].regions[0]
-    override = {
-        'window': win,
-        'screen': scr,
-        'area': areas[0],
-        'region': region,
-        'scene': bpy.context.scene,
-        'object': bpy.context.active_object,
-    }
-    Log.debug(f'Context override: {override}')
-    return override
+    if mode == 'current':
+        win = bpy.context.window
+        scr = win.screen
+        areas = [a for a in scr.areas if a.type == area]
+        if not areas:
+            raise RuntimeError(f"No area of type '{area}' found in the current screen.")
+        region = areas[0].regions[0]
+        override = {
+            'window': win,
+            'screen': scr,
+            'area': areas[0],
+            'region': region,
+            'scene': bpy.context.scene,
+            'object': bpy.context.active_object,
+        }
+        Log.debug(f'Context override: {override}')
+    elif mode == 'global':
+        Break = False
+        for screen in bpy.data.screens:
+            for area in screen.areas:
+                if area.type == type:
+                    override = {"area": area, "screen": screen}
+                    Break = True
+                    break
+            if Break:
+                break
+    with bpy.context.temp_override(**override):
+        yield
 
 
 @contextmanager
@@ -228,18 +182,18 @@ def new_action(
     """
     old_action = track = strip = None
     start = 1
+    if not obj:
+        obj = bpy.context.active_object
+    if not obj:
+        raise ValueError('No object found')
+    if not obj.animation_data:
+        obj.animation_data_create()
+    if not obj.animation_data:
+        raise ValueError('No animation data found')
+    if obj.animation_data.action:
+        old_action = obj.animation_data.action
+    # Log.debug(f'old_action={old_action}')
     try:
-        if not obj:
-            obj = bpy.context.active_object
-        if not obj:
-            raise ValueError('No object found')
-        if not obj.animation_data:
-            obj.animation_data_create()
-        if not obj.animation_data:
-            raise ValueError('No animation data found')
-        if obj.animation_data.action:
-            old_action = obj.animation_data.action
-        # Log.debug(f'old_action={old_action}')
         action = obj.animation_data.action = bpy.data.actions.new(name=name)
         try:
             Log.debug(f'action_suitable_slots={obj.animation_data.action_suitable_slots}')
@@ -316,7 +270,7 @@ class MotionData(dict):
             who = f'person{who}'
 
         for k, v in self.items():
-            is_in = [skip_or_in(args, k) for args in [mapping, run, who, prop, coord]]
+            is_in = [in_or_skip(args, k, ';{};') for args in [mapping, run, who, prop, coord]]
             is_in = all(is_in)
             if is_in:
                 D[k] = v
@@ -408,17 +362,19 @@ def log_array(arr: Union[np.ndarray, list], name='ndarray'):
     return text
 
 
-def dump_bones(armature):
-    """将骨架转换为字典"""
-    def bone_to_dict(bone, deep=0, deep_max=1000):
-        if deep_max and deep > deep_max:
-            raise ValueError(f'Bones tree too deep, {deep} > {deep_max}')
-        return {child.name: bone_to_dict(child, deep + 1) for child in bone.children}
+def bone_to_dict(bone, whiteList: Optional[Sequence[str]] = None):
+    """bone to dict, Recursive calls to this function form a tree"""
+    # if deep_max and deep > deep_max:
+    #     raise ValueError(f'Bones tree too deep, {deep} > {deep_max}')
+    return {child.name: bone_to_dict(child) for child in bone.children if in_or_skip(child.name, whiteList)}
 
+
+def bones_tree(armature: 'bpy.types.Object', whiteList: Optional[Sequence[str]] = None):
+    """bones to dict tree"""
     if armature and armature.type == 'ARMATURE':
         for bone in armature.pose.bones:
             if not bone.parent:
-                return {bone.name: bone_to_dict(bone)}
+                return {bone.name: bone_to_dict(bone, whiteList)}
     return {}
 
 
@@ -462,6 +418,19 @@ def keys_BFS(
     return ret
 
 
+def get_bones_info(armature=None):
+    """For debug: print bones info"""
+    armatures = get_armatures()
+    S = ""
+    for armature in armatures:
+        tree = bones_tree(armature=armature)
+        List = keys_BFS(tree)
+        S += f"""
+TYPE_BODY = Literal{List}
+BONES_TREE = {tree}"""
+    return S
+
+
 def get_similar(list1, list2):
     """
     calc jaccard similarity of two lists
@@ -478,7 +447,7 @@ def get_similar(list1, list2):
 def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> Union[TYPE_MAPPING, None]:
     if obj.type != 'ARMATURE':
         return None
-    bones = dump_bones(obj)
+    bones = bones_tree(obj)
     keys = keys_BFS(bones)
     mapping = None
     max_similar = 0
@@ -493,65 +462,93 @@ def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> Union[TYPE_MAPPIN
     return mapping  # type: ignore
 
 
-def get_mapping_from_selected_or_objs(mapping: Union[TYPE_MAPPING, None] = None):
+def get_mapping(mapping: Union[TYPE_MAPPING, None] = None, armature=None):
     """
     import mapping module by name
     will set global variable BODY(temporary)
     """
     if mapping is None:
         # guess mapping
-        active = bpy.context.active_object
-        if active:
-            mapping = guess_obj_mapping(active)
-        else:
-            for obj in bpy.data.objects:
-                if obj.type == 'ARMATURE':
-                    mapping = guess_obj_mapping(obj)
-                    if mapping:
-                        break
+        active = get_armatures()[0] if not armature else armature
+        mapping = guess_obj_mapping(active)
     if mapping is None:
         raise ValueError(f'Unknown mapping: {mapping}, try to select/add new mapping to')
     return mapping
 
 
-def add_mapping(armature):
-    """
-    add mapping based on selected armature
-    """
-    if not armature:
-        armature = bpy.context.active_object
-    if not armature or armature.type != 'ARMATURE':
+def get_armatures(armatures=None):
+    """if None, always get active(selected) armature"""
+    if not armatures:
+        armatures = bpy.context.selected_objects
+    if not armatures:
         raise ValueError('Please select an armature')
-    bones_tree = dump_bones(armature)
-    bones = keys_BFS(bones_tree)
-    map = {}
-    for x, my in zip(Map()['smplx'].BONES, bones, strict=False):
-        map[x] = my
+    for armature in armatures:
+        if armature.type != 'ARMATURE':
+            raise ValueError(f'Not an armature: {armature.name}')
+    return armatures
 
-    t = ''
-    with open(MAPPING_TEMPLATE, 'r') as f:
-        t = f.read()
-    # fastest way but not safe, {format} to 《》
-    t = re.sub(r'\{(.*)\}(?= *#)', r'《\1》', t)
-    # {} to 「」
-    t = re.sub(r'{', '「', t)
-    t = re.sub(r'}', '」', t)
-    # 《》 to {}
-    t = re.sub(r'《', '{', t)
-    t = re.sub(r'》', '}', t)
-    t = t.format(t, type_body=bones, map=map, bones_tree=bones_tree)
-    # 「」 to {}
-    t = re.sub(r'「', '{', t)
-    t = re.sub(r'」', '}', t)
 
-    filename = f'{armature.name}.py'
-    file: str = os.path.join(DIR_MAPPING, filename)
-    if os.path.exists(file):
-        raise FileExistsError(f'Mapping exists: {file}')
+def get_selected_bones(armature=None, context=None):
+    """if None, always get active(selected) bones"""
+    if not context:
+        context = bpy.context
+    obj = get_armatures([armature])[0]
+
+    if context.mode == 'OBJECT':
+        data = obj.data
+        selected_bones = [bone for bone in data.bones if bone.select]
+    elif context.mode == 'POSE':
+        pose = obj.pose
+        selected_bones = [bone for bone in pose.bones if bone.bone.select]
     else:
-        with open(file, 'w') as f:
-            f.write(t)
-    Log.info(f'Restart addon to update mapping:  {file}')
+        raise ValueError("Please select an armature in OBJECT or POSE mode.")
+    bones: list[str] = [bone.name for bone in selected_bones]
+    len_bones = len(bones)
+    len_smplx = len(Map()['smplx'].BODY)   # TODO: use smplx BONES
+    if len_bones != len_smplx:
+        Log.warning(f'{obj.name}: selected {len_bones}, but should be {len_smplx}')
+    return bones
+
+
+def add_mapping(armatures: Optional[Sequence['bpy.types.Object']] = None, check=True):
+    """
+    add mapping based on selected armatures
+    """
+    files: list[str] = []
+    if not armatures:
+        armatures = get_armatures()
+    for armature in armatures:
+        tree = bones_tree(armature, whiteList=get_selected_bones(armature=armature))
+        bones = keys_BFS(tree)
+        map = {}
+        for x, my in zip(Map()['smplx'].BONES, bones, strict=False):
+            map[x] = my
+
+        t = ''
+        with open(MAPPING_TEMPLATE, 'r') as f:
+            t = f.read()
+        # fastest way but not safe, {format} to 《》
+        t = re.sub(r'\{(.*)\}(?= *#)', r'《\1》', t)
+        # {} to 「」
+        t = re.sub(r'{', '「', t)
+        t = re.sub(r'}', '」', t)
+        # 《》 to {}
+        t = re.sub(r'《', '{', t)
+        t = re.sub(r'》', '}', t)
+        t = t.format(t, armature=armature.name, type_body=bones, map=map, bones_tree=tree)
+        # 「」 to {}
+        t = re.sub(r'「', '{', t)
+        t = re.sub(r'」', '}', t)
+
+        filename = f'{armature.name}.py'
+        file: str = os.path.join(DIR_MAPPING, filename)
+        if check and os.path.exists(file):
+            Log.error(f'Mapping exists: {file}')
+        else:
+            with open(file, 'w') as f:
+                f.write(t)
+        files.append(file)
+    return files
 
 
 def check_before_run(
@@ -581,7 +578,7 @@ def check_before_run(
     bone_rot = 'QUATERNION' if not bone_rot else bone_rot
 
     mapping = None if mapping == 'auto' else mapping
-    mapping = get_mapping_from_selected_or_objs(mapping)
+    mapping = get_mapping(mapping)
     BONES = getattr(Map()[mapping], key, 'BODY')   # type:ignore
 
     if is_range and Range[1] is None:
@@ -606,7 +603,6 @@ def apply(who: Union[str, int], mapping: Optional[TYPE_MAPPING], **kwargs):
 def Axis(is_torch=False): return 'dim' if is_torch else 'axis'
 
 
-@deprecated('use `quat_rotAxis` instead')
 def quat(xyz: TN) -> TN:
     """euler to quat
     Args:

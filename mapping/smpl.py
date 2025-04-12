@@ -1,5 +1,5 @@
 """smpl bones struct with 24 body bones"""
-from .smplx import TYPE_BONES as T_BONES, BONES as X_BONES, BODY as X_BODY
+from .smplx import TYPE_BONES as T_BONES, BODY as X_BODY  # BONES as X_BONES
 from typing import Literal, Dict, get_args
 ...
 ...

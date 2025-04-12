@@ -1,4 +1,4 @@
-"""generate from `Add Mapping`"""
+"""generate from {armature} #, after editing you can contribute by https://github.com/AClon314/mocap-wrapper/issues/new?template=feature_request.md ♥️"""
 from typing import Literal, Dict, get_args
 TYPE_BODY = Literal{type_body}   # type: ignore
 TYPE_HEAD = Literal[

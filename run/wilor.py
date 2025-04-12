@@ -29,7 +29,6 @@ def wilor(
 
     with new_action(armature, ';'.join([data.who, data.run_keyname])) as action:
         for f in _Range:
-            # print(f'wilor {ID}: {f}/{range_frame[1]}\t{f / range_frame[1] * 100:.3f}%', end='\r')
             apply_pose(action=action, pose=pose[f], frame=f + 1, bones=HAND, bone_rot=bone_rot, **kwargs)
 
     Log.info(f'done')

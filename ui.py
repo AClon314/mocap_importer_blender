@@ -4,7 +4,7 @@ import bpy
 import traceback
 from typing import Callable
 try:
-    from .lib import DIR_MAPPING, getLogger, items_mapping, dump_bones, keys_BFS, load_data, add_mapping, apply, items_motions
+    from .lib import DIR_MAPPING, getLogger, items_mapping, items_motions, get_bones_info, load_data, add_mapping, apply
 except ImportError as e:
     print(f'ui ⚠️ {e}')
     from lib import *
@@ -17,7 +17,7 @@ BL_CONTEXT = 'objectmode'
 def Props(context): return context.scene.mocap_importer
 
 
-def Execute(self, func: Callable):
+def Execute(func: Callable, self, context):
     """usage
     ```python
     def execute(self, context):
@@ -27,7 +27,7 @@ def Execute(self, func: Callable):
     ```
     """
     try:
-        func()
+        func(self=self, context=context)
         return {'FINISHED'}
     except Exception as e:
         self.report({'ERROR'}, str(e))
@@ -175,10 +175,8 @@ class GetBonesInfo_Operator(bpy.types.Operator):
     bl_description = 'print bones info for making mapping or debugging'
 
     def execute(self, context):
-        tree = dump_bones(context.active_object)
-        List = keys_BFS(tree)
-        print('TYPE_BODY = Literal', List)
-        print('BONES', tree)
+        s = get_bones_info()
+        Log.info(s, extra={'mouse': False})
         return {'FINISHED'}
 
 
@@ -188,6 +186,7 @@ class OpenMapping_Operator(bpy.types.Operator):
     bl_description = 'Open mapping folder'
 
     def execute(self, context):
+        # TODO: when no file manager opened, this may freeze or popop with DEFAULT style in linux
         bpy.ops.wm.path_open(filepath=DIR_MAPPING)
         return {'FINISHED'}
 
@@ -199,10 +198,12 @@ class AddMapping_Operator(bpy.types.Operator):
     bl_options = {'REGISTER'}
 
     def execute(self, context):
-        def wrap():
-            add_mapping(context.active_object)
+        try:
+            add_mapping()
+        except FileExistsError:
             bpy.ops.wm.open_dir_mapping()   # type: ignore
-        return Execute(self, wrap)
+            raise
+        return {'FINISHED'}
 
 
 class ReloadScriptOperator(bpy.types.Operator):
