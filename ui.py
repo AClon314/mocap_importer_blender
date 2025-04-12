@@ -4,35 +4,16 @@ import bpy
 import traceback
 from typing import Callable
 try:
-    from .lib import DIR_MAPPING, getLogger, items_mapping, items_motions, get_bones_info, load_data, add_mapping, apply
+    from .lib import DIR_MAPPING, Log, execute, items_mapping, items_motions, get_bones_info, load_data, add_mapping, apply
 except ImportError as e:
     print(f'ui ⚠️ {e}')
     from lib import *
-Log = getLogger(__name__)
 BL_ID = 'MOCAP_PT_Panel'
 BL_CATAGORY = 'SMPL-X'
 BL_SPACE = 'VIEW_3D'
 BL_REGION = 'UI'
 BL_CONTEXT = 'objectmode'
 def Props(context): return context.scene.mocap_importer
-
-
-def Execute(func: Callable, self, context):
-    """usage
-    ```python
-    def execute(self, context):
-        def wrap():
-            ...
-        return Execute(self, wrap)
-    ```
-    """
-    try:
-        func(self=self, context=context)
-        return {'FINISHED'}
-    except Exception as e:
-        self.report({'ERROR'}, str(e))
-        Log.error(traceback.format_exc())
-        return {'CANCELLED'}
 
 
 class Mocap_PropsGroup(bpy.types.PropertyGroup):
@@ -159,6 +140,7 @@ class LoadMocap_Operator(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
     bl_description = 'Load mocap data from npz file.'
 
+    @execute
     def execute(self, context):
         scene = context.scene
         props = Props(context)
@@ -174,6 +156,7 @@ class GetBonesInfo_Operator(bpy.types.Operator):
     bl_label = 'print bones'
     bl_description = 'print bones info for making mapping or debugging'
 
+    @execute
     def execute(self, context):
         s = get_bones_info()
         Log.info(s, extra={'mouse': False})
@@ -185,6 +168,7 @@ class OpenMapping_Operator(bpy.types.Operator):
     bl_label = 'Open Folder'
     bl_description = 'Open mapping folder'
 
+    @execute
     def execute(self, context):
         # TODO: when no file manager opened, this may freeze or popop with DEFAULT style in linux
         bpy.ops.wm.path_open(filepath=DIR_MAPPING)
@@ -197,6 +181,7 @@ class AddMapping_Operator(bpy.types.Operator):
     bl_description = 'Add mapping based on selected armature'
     bl_options = {'REGISTER'}
 
+    @execute
     def execute(self, context):
         try:
             add_mapping()
@@ -212,6 +197,7 @@ class ReloadScriptOperator(bpy.types.Operator):
     bl_options = {'REGISTER'}
     bl_description = 'Reload Script. 重载脚本'
 
+    @execute
     def execute(self, context):
         # 获取当前文本编辑器
         for area in bpy.context.screen.areas:

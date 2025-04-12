@@ -23,46 +23,39 @@ def msg_mouse(
     bpy.context.window_manager.popup_menu(draw, title=title, icon=icon)  # type: ignore
 
 
-class Report_Operator(bpy.types.Operator):
-    """deprecated, only working when trigger from GUI`F3`, can't push to INFO LOG PANEL: https://projects.blender.org/blender/blender/issues/97284  
-    report to status bar, https://docs.blender.org/api/current/bpy_types_enum_items/wm_report_items.html#rna-enum-wm-report-items"""
-    bl_idname = 'wm.report'
-    bl_label = f'Report Message ({_PKG_})'
-    msg: bpy.props.StringProperty(name="Message", default="Log operator msg")  # type: ignore
-    lvl: bpy.props.StringProperty(name="Level", default='INFO')    # type: ignore
-
-    def execute(self, context):
-        msg = f'{self.msg} {context} {len(dir(context))}'
-        self.report({self.lvl}, msg)
-        return {'FINISHED'}
-
-
 class CustomLogger(logging.Logger):
-    """```python
-extra={'mouse': True, 'report': True, 
-    'icon': ['NONE','INFO', 'INFO_LARGE', 'WARNING_LARGE', 'ERROR', 'CANCEL'][0], 
-    'lvl': ['DEBUG','INFO','WARNING','ERROR',
-            'ERROR_INVALID_INPUT','ERROR_INVALID_CONTEXT','ERROR_OUT_OF_MEMORY',
-            'OPERATOR','PROPERTY'][0]
+    """Usage:
+```python
+extra={'mouse': True, 'report': True, 'log': True,
+        'icon': ['NONE','INFO', 'INFO_LARGE', 'WARNING_LARGE', 'ERROR', 'CANCEL'][0], 
+        'lvl': ['DEBUG','INFO','WARNING','ERROR',
+                'ERROR_INVALID_INPUT','ERROR_INVALID_CONTEXT','ERROR_OUT_OF_MEMORY',
+                'OPERATOR','PROPERTY'][0]
 }"""
 
-    def _log(self, level, msg: str, args, exc_info=None, extra: Optional[dict] = None, stack_info=False, stacklevel=2):
+    def _log(self, level, msg: str, args, exc_info=None, extra: Optional[dict] = None, stack_info=False, stacklevel=1):
         Level = logging.getLevelName(level)
         lvl: str = Pop(extra, 'lvl', Level)
-        is_mouse: bool = Pop(extra, 'mouse', True)
-        is_report: bool = Pop(extra, 'report', False)
+        if level == logging.DEBUG:
+            is_mouse = False
+            is_report = False
+            stack_info = True
+        else:
+            is_mouse: bool = Pop(extra, 'mouse', True)
+            is_report: bool = Pop(extra, 'report', True)
+        is_log: bool = Pop(extra, 'log', not is_report)
         kwargs = dict(level=level, msg=msg, args=args, exc_info=exc_info, extra=extra, stack_info=stack_info, stacklevel=stacklevel)
         try:
             if is_mouse:
                 icon: str = Pop(extra, 'icon', _LOG_ICON.get(Level, 'NONE'))    # type: ignore
                 _msg = msg if len(msg) > MSG_TRUNK else ''
                 msg_mouse(title=msg[:MSG_TRUNK], msg=_msg, icon=icon)
-            if is_report:
-                bpy.ops.wm.report(lvl=lvl, msg=msg)  # type: ignore
-            else:
+            if is_report and hasattr(self, 'report'):
+                self.report(type={lvl}, message=msg)   # type: ignore
+            if is_log:
                 super()._log(**kwargs)
         except Exception as e:
-            kwargs['msg'] = f"{kwargs['msg']}\tLog:{e}"
+            kwargs['msg'] = f"{kwargs['msg']}\tLogError: {e}"
             super()._log(**kwargs)
 
 
@@ -82,14 +75,26 @@ def getLogger(name=__name__, level=logging.DEBUG):
         class CustomFormatter(logging.Formatter):
             def format(self, record):
                 return super().format(record)
-
         stream_handler.setFormatter(
             CustomFormatter(
-                '%(levelname)s\t%(asctime)s  %(message)s\t%(name)s:%(lineno)d',
+                '%(levelname)s\t%(asctime)s  %(message)s',  # %(name)s:%(lineno)d
                 datefmt='%H:%M:%S'))
         Log.addHandler(stream_handler)
-
     return Log
+
+
+Log = getLogger()
+
+
+def execute(func):
+    """bpy.Operator: `self.report()`"""
+
+    def wrap(self, context):
+        setattr(Log, 'report', self.report)
+        ret = func(self, context)
+        delattr(Log, 'report')
+        return ret
+    return wrap
 
 
 @contextmanager

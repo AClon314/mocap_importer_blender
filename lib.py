@@ -7,7 +7,7 @@ import bpy
 import sys
 import importlib
 import numpy as np
-from .logger import getLogger
+from .logger import Log, execute
 from contextlib import contextmanager
 from types import ModuleType
 from typing import Any, Dict, List, Optional, Sequence, Union, Literal, TypeVar, get_args
@@ -24,9 +24,6 @@ TYPE_I18N = Literal[  # blender 4.3.2
 T = TypeVar('T')
 TN = np.ndarray
 MOTION_DATA = None
-
-
-Log = getLogger(__name__)
 try:
     from mathutils import Matrix, Vector, Quaternion, Euler
 except ImportError as e:
@@ -88,6 +85,8 @@ def items_mapping(self=None, context=None):
 
 def items_motions(self=None, context=None):
     items: List[tuple[str, str, str]] = []
+    if MOTION_DATA is None:
+        load_data()
     if MOTION_DATA is not None:
         for k in MOTION_DATA.whos:
             items.append((k, k, ''))
@@ -193,40 +192,38 @@ def new_action(
     if obj.animation_data.action:
         old_action = obj.animation_data.action
     # Log.debug(f'old_action={old_action}')
+    action = obj.animation_data.action = bpy.data.actions.new(name=name)
     try:
-        action = obj.animation_data.action = bpy.data.actions.new(name=name)
-        try:
-            Log.debug(f'action_suitable_slots={obj.animation_data.action_suitable_slots}')
-            slot = action.slots.new(id_type='OBJECT', name=name)
-            obj.animation_data.action_slot = slot
-        except AttributeError:
-            Log.info('skip create action slot because blender < 4.4')
-        if nla_push:
-            # find track that track.name==name, append behind the last strip of the same track
-            tracks = [t for t in obj.animation_data.nla_tracks if t.name == name]
-            if len(tracks) > 0:
-                track = tracks[0]
-            else:
-                track = obj.animation_data.nla_tracks.new()
-            track.name = name
-
-            strips = track.strips
-            if len(strips) > 0:
-                start = int(strips[-1].frame_end)
-            # Log.debug(f'start={start}, strips={strips}')
-            strip = track.strips.new(name=name, start=start, action=action)
-            # strip.extrapolation = 'HOLD'
-            # strip.blend_type = 'REPLACE'
-        yield action
-    finally:
-        if nla_push and strip:
-            Len = action.frame_range[1]
-            strip.action_frame_end = Len
-            # strip.frame_end = start + Len
-        if old_action and obj and obj.animation_data and obj.animation_data.action:
-            obj.animation_data.action = old_action
+        Log.debug(f'action_suitable_slots={obj.animation_data.action_suitable_slots}')
+        slot = action.slots.new(id_type='OBJECT', name=name)
+        obj.animation_data.action_slot = slot
+    except AttributeError:
+        Log.info('skip create action slot because blender < 4.4')
+    if nla_push:
+        # find track that track.name==name, append behind the last strip of the same track
+        tracks = [t for t in obj.animation_data.nla_tracks if t.name == name]
+        if len(tracks) > 0:
+            track = tracks[0]
         else:
-            Log.info('No action to restore')
+            track = obj.animation_data.nla_tracks.new()
+        track.name = name
+
+        strips = track.strips
+        if len(strips) > 0:
+            start = int(strips[-1].frame_end)
+        # Log.debug(f'start={start}, strips={strips}')
+        strip = track.strips.new(name=name, start=start, action=action)
+        # strip.extrapolation = 'HOLD'
+        # strip.blend_type = 'REPLACE'
+    yield action
+    if nla_push and strip:
+        Len = action.frame_range[1]
+        strip.action_frame_end = Len
+        # strip.frame_end = start + Len
+    if old_action and obj and obj.animation_data and obj.animation_data.action:
+        obj.animation_data.action = old_action
+    else:
+        Log.info('No action to restore')
 
 
 class MotionData(dict):

@@ -1,5 +1,4 @@
 from ..lib import *
-Log = getLogger(__name__)
 
 
 def wilor(
