@@ -33,16 +33,17 @@ extra={'mouse': True, 'report': True, 'log': True,
                 'OPERATOR','PROPERTY'][0]
 }"""
 
-    def _log(self, level, msg: str, args, exc_info=None, extra: Optional[dict] = None, stack_info=False, stacklevel=1):
+    def _log(self, level, msg: str, args, exc_info=None, extra: Optional[dict] = None, stack_info=None, stacklevel=1):
         Level = logging.getLevelName(level)
         lvl: str = Pop(extra, 'lvl', Level)
         if level == logging.DEBUG:
             is_mouse = False
             is_report = False
-            stack_info = True
+            stack_info = True if stack_info == None else stack_info
         else:
             is_mouse: bool = Pop(extra, 'mouse', True)
             is_report: bool = Pop(extra, 'report', True)
+            stack_info = False if stack_info == None else stack_info
         is_log: bool = Pop(extra, 'log', not is_report)
         kwargs = dict(level=level, msg=msg, args=args, exc_info=exc_info, extra=extra, stack_info=stack_info, stacklevel=stacklevel)
         try:

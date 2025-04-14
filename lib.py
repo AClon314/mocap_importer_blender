@@ -9,6 +9,7 @@ import importlib
 import numpy as np
 from .logger import Log, execute
 from contextlib import contextmanager
+from numbers import Number
 from types import ModuleType
 from typing import Any, Dict, List, Optional, Sequence, Union, Literal, TypeVar, get_args
 DIR_SELF = os.path.dirname(__file__)
@@ -103,32 +104,46 @@ def load_data(self=None, context=None):
     MOTION_DATA = MotionData(npz=file)
 
 
-def add_keyframe(
+def add_keyframes(
     action: 'bpy.types.Action',
+    vectors: Union[Sequence[float], Vector],
+    frame: int,
     data_path: str,
-    at_frame: int,
-    vector: Union[Sequence, Vector, Quaternion, Euler],
     group='',
 ):
     """
     add/override fcurve
 
     Args:
+        frame (int): `frame_begin if is_multi_frames else at_which_frame`
         data_path (str): eg: `location` `rotation_quaternion` `rotation_euler` `pose.bones["pelvis"].location`
         group (str): fcurve group name
+
     Usage:
     ```python
-    add_keyframe(action, f'pose.bones["{BODY[i]}"].rotation_quaternion', frame, quat, BODY[i])
+    add_keyframes(action, rots[:, i], 1, f'pose.bones["{B}"].rotation_euler', f'{i}_{B}')
     ```
     """
     fcurves = action.fcurves
-    kw = dict(data_path=data_path, index=0)
-    for i, x in enumerate(vector):  # type: ignore
-        kw['index'] = i
-        fcurve = fcurves.find(**kw)  # type: ignore
+    kw: dict = dict(data_path=data_path)
+    if isinstance(vectors[0], Number):
+        is_multi = False
+        channels = len(vectors)
+    else:
+        is_multi = True
+        channels = len(vectors[0])  # type: ignore
+    for C in range(channels):
+        kw['index'] = C
+        fcurve = fcurves.find(**kw)
         if not fcurve:
-            fcurve = fcurves.new(**kw)  # type: ignore
-        fcurve.keyframe_points.insert(at_frame, value=x)
+            fcurve = fcurves.new(**kw)
+
+        if is_multi:
+            for F in range(len(vectors)):
+                fcurve.keyframe_points.insert(frame + F, value=vectors[F][C])   # type: ignore
+        else:
+            fcurve.keyframe_points.insert(frame, value=vectors[C])
+        # Log.debug(f'is_multi={is_multi}, channels={channels}, shape={vectors.shape}', stack_info=False)
 
         if group and (not fcurve.group or fcurve.group.name != group):
             if group not in action.groups:
@@ -179,7 +194,7 @@ def temp_override(area='NLA_EDITOR', mode: Literal['global', 'current'] = 'curre
 
 
 @contextmanager
-def new_action(
+def bpy_action(
     obj: Optional['bpy.types.Object'] = None,
     name='Action',
     nla_push=True,
@@ -191,8 +206,7 @@ def new_action(
     """
     old_action = track = strip = None
     start = 1
-    if not obj:
-        obj = bpy.context.active_object
+    obj = bpy.context.active_object if not obj else obj
     if not obj:
         raise ValueError('No object found')
     if not obj.animation_data:
@@ -204,13 +218,13 @@ def new_action(
     # Log.debug(f'old_action={old_action}')
     action = obj.animation_data.action = bpy.data.actions.new(name=name)
     try:
-        Log.debug(f'action_suitable_slots={obj.animation_data.action_suitable_slots}')
+        # Log.debug(f'action_suitable_slots={obj.animation_data.action_suitable_slots}')
         slot = action.slots.new(id_type='OBJECT', name=name)
         obj.animation_data.action_slot = slot
     except AttributeError:
         Log.info('skip create action slot because blender < 4.4')
     if nla_push:
-        # find track that track.name==name, append behind the last strip of the same track
+        # find track that track.name==name
         tracks = [t for t in obj.animation_data.nla_tracks if t.name == name]
         if len(tracks) > 0:
             track = tracks[0]
@@ -218,6 +232,7 @@ def new_action(
             track = obj.animation_data.nla_tracks.new()
         track.name = name
 
+        # append behind the last strip of current track
         strips = track.strips
         if len(strips) > 0:
             start = int(strips[-1].frame_end)
@@ -566,6 +581,7 @@ def check_before_run(
 ):
     """
     guess mapping[smpl,smplx]/Range_end/bone_rotation_mode[eular,quat]
+    TODO: OMG, this shit💩 is too bad, need to refactor
 
     Usage:
     ```python
@@ -580,8 +596,8 @@ def check_before_run(
     if armature is None or armature.type != 'ARMATURE':
         raise ValueError('No armature found')
     bones_rots: list[TYPE_ROT] = [b.rotation_mode for b in armature.pose.bones]
-    bone_rot = get_major(bones_rots)
-    bone_rot = 'QUATERNION' if not bone_rot else bone_rot
+    rot = get_major(bones_rots)
+    rot = 'QUATERNION' if not rot else rot
 
     mapping = None if mapping == 'auto' else mapping
     mapping = get_mapping(mapping)
@@ -590,10 +606,9 @@ def check_before_run(
     if is_range and Range[1] is None:
         Range[1] = len(data(prop='global_orient').value)    # TODO: use data.frames
         Log.info(f'range_frame[1] fallback to {Range[1]}')
-    _Range = range(*Range)
     str_map = f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping
     Log.info(f'mapping from {str_map}')
-    return data, armature, bone_rot, BONES, _Range
+    return data, armature, rot, BONES, slice(*Range)
 
 
 def apply(who: Union[str, int], mapping: Optional[TYPE_MAPPING], **kwargs):
@@ -878,18 +893,26 @@ def RotMat_to_quat(R: TN) -> TN:
 def quat_rotAxis(arr: TN) -> TN: return RotMat_to_quat(Rodrigues(arr))
 
 
-def apply_pose(
+def pose_to_keyframes(
     action: 'bpy.types.Action',
-    pose,
-    frame: int,
     bones: Sequence[str],
-    trans: Optional[Any] = None,
-    bone_rot: TYPE_ROT = 'QUATERNION',
+    pose: 'np.ndarray',
+    transl: Optional['np.ndarray'] = None,
+    transl_base: Optional['np.ndarray'] = None,
+    rot: TYPE_ROT = 'QUATERNION',
+    frame=1,
     **kwargs
 ):
-    """Apply translation, pose, and shape to character using Action and F-Curves."""
+    """Apply translation, pose, and shape to character using Action and F-Curves.
+
+    Args:
+        bones: `index num` mapping to `bone names`
+        transl_base: if **NOT None**, transl will be **relative** to transl_base
+        rot: blender rotation mode
+        frame: begin frame
+    """
     method = str(kwargs.get('quat', 0))[0]
-    if bone_rot == 'QUATERNION':
+    if rot == 'QUATERNION':
         if method == 'a':  # axis
             rots = quat_rotAxis(pose)
         elif method == 'r':  # raw
@@ -899,19 +922,37 @@ def apply_pose(
     else:
         rots = euler(pose)
 
-    start = 0
-    if trans is not None:
-        add_keyframe(action, f'location', frame, trans)
-        # add_keyframe(action, f'pose.bones["{bones[0]}"].location', frame, trans, f'0{bones[0]}')
-        start = 1
+    if transl is not None:
+        if transl_base is not None:
+            transl = transl - transl_base
+            add_keyframes(action, transl_base, frame, f'location', 'Object Transforms')
+        add_keyframes(action, transl, 1, f'pose.bones["{bones[0]}"].location', bones[0])
 
-    # Insert rotation keyframes for each bone
-    for i, rot in enumerate(rots, start=start):  # Skip root!
-        bone = bones[i]
-        if bone_rot == 'QUATERNION':
-            add_keyframe(action, f'pose.bones["{bone}"].rotation_quaternion', frame, rot, f'{i}_{bone}')
+    bones = bones[1:] if bones[0] == 'root' else bones  # Skip root!
+    for i, B in enumerate(bones):
+        if rot == 'QUATERNION':
+            add_keyframes(action, rots[:, i], frame, f'pose.bones["{B}"].rotation_quaternion', B)
         else:
-            add_keyframe(action, f'pose.bones["{bone}"].rotation_euler', frame, rot, f'{i}_{bone}')
+            add_keyframes(action, rots[:, i], frame, f'pose.bones["{B}"].rotation_euler', B)
+    return action
+
+
+def pose_reset(
+    action: 'bpy.types.Action',
+    bones: Sequence[str],
+    rot: TYPE_ROT = 'QUATERNION',
+    frame=0,
+):
+    """Reset bones to ZERO rotation at frame"""
+    if rot == 'QUATERNION':
+        ZERO = [1, 0, 0, 0]
+    else:
+        ZERO = [0, 0, 0]
+    for i, B in enumerate(bones):
+        if rot == 'QUATERNION':
+            add_keyframes(action, [1, 0, 0, 0], frame, f'pose.bones["{B}"].rotation_quaternion', B)
+        else:
+            add_keyframes(action, [0, 0, 0], frame, f'pose.bones["{B}"].rotation_euler', B)
     return action
 
 

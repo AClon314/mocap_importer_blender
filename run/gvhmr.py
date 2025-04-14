@@ -43,14 +43,13 @@ def gvhmr(
     gvhmr(data('smplx', 'gvhmr', person=0))
     ```
     """
-    data, armature, bone_rot, BODY, _Range = check_before_run('gvhmr', 'BODY', data, Range, mapping)
-
-    translation = data(prop='transl', coord='global').value
-    rotate = data(prop='global_orient', coord='global').value
+    data, armature, rot, BODY, Slice = check_before_run('gvhmr', 'BODY', data, Range, mapping)
+    transl = data(prop='transl', coord='global').value[Slice]
+    rotate = data(prop='global_orient', coord='global').value[Slice]
     rotate = rotate.reshape(-1, 1, rotate.shape[-1])
-    pose = data(prop='body_pose', coord='global').value
-    pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3|4)
+    pose = data(prop='body_pose', coord='global').value[Slice]
+    pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3 or 4)
 
-    with new_action(armature, ';'.join([data.who, data.run])) as action:
-        for f in _Range:
-            apply_pose(action=action, pose=pose[f], trans=translation[f], frame=f + 1, bones=BODY, bone_rot=bone_rot, **kwargs)
+    with bpy_action(armature, ';'.join([data.who, data.run])) as action:
+        pose_reset(action, BODY[:23], rot)
+        pose_to_keyframes(action=action, pose=pose, transl=transl, transl_base=transl[Slice.start], bones=BODY[:23], rot=rot, **kwargs)
