@@ -47,7 +47,7 @@ def warn_or_return_first(L: List[T]) -> T:
     """used in class `MotionData`"""
     Len = len(L)
     if Len > 1:
-        Log.warning(f'{Len} > 1 from {L}')
+        Log.warning(f'{Len} > 1', extra={'report': False}, stack_info=True)
     return L[0]
 
 
@@ -84,6 +84,7 @@ def items_mapping(self=None, context=None):
 
 
 def items_motions(self=None, context=None):
+    """TODO: this func will trigger when redraw, so frequently"""
     items: List[tuple[str, str, str]] = []
     if MOTION_DATA is None:
         load_data()
@@ -107,13 +108,17 @@ def add_keyframe(
     data_path: str,
     at_frame: int,
     vector: Union[Sequence, Vector, Quaternion, Euler],
+    group='',
 ):
     """
-    also override fcurve if exists
+    add/override fcurve
 
+    Args:
+        data_path (str): eg: `location` `rotation_quaternion` `rotation_euler` `pose.bones["pelvis"].location`
+        group (str): fcurve group name
     Usage:
     ```python
-    insert_frame(action, f'pose.bones["{BODY[i]}"].rotation_quaternion', frame, quat)
+    add_keyframe(action, f'pose.bones["{BODY[i]}"].rotation_quaternion', frame, quat, BODY[i])
     ```
     """
     fcurves = action.fcurves
@@ -124,6 +129,11 @@ def add_keyframe(
         if not fcurve:
             fcurve = fcurves.new(**kw)  # type: ignore
         fcurve.keyframe_points.insert(at_frame, value=x)
+
+        if group and (not fcurve.group or fcurve.group.name != group):
+            if group not in action.groups:
+                action.groups.new(name=group)
+            fcurve.group = action.groups[group]
     return action
 
 
@@ -230,7 +240,8 @@ class MotionData(dict):
     """
     usage:
     ```python
-    data(mapping='smplx', run='gvhmr', key='trans', coord='global').values()[0]
+    # __call__ is filter
+    data(mapping='smplx', run='gvhmr', prop='trans', coord='global').values()[0]
     ```
     """
 
@@ -282,25 +293,24 @@ class MotionData(dict):
         """
         L: List[str] = []
         for k in self.keys():
-            if isinstance(k, str):
-                keys = k.split(';')
-                if len(keys) > col_num:
-                    col_name = keys[col_num]
-                    if col_name not in L:
-                        L.append(col_name)
+            keys = k.split(';')
+            col_name = keys[col_num]
+            if col_name not in L:
+                L.append(col_name)
         return L
 
     @property
     def mappings(self): return self.distinct(0)
     @property
-    def runs_keyname(self): return self.distinct(1)
+    def runs(self): return self.distinct(1)
     @property
     def whos(self): return self.distinct(2)
 
-    @property
-    def props(self):
-        """could return `[your_customkeys, '*_pose', 'global_orient', 'transl', 'betas']`"""
-        return self.distinct(3)
+    def props(self, col=0):
+        """
+        Returns:
+            `['*_pose', 'global_orient', 'transl', 'betas', your_customkeys]`"""
+        return self.distinct(col + 3)
 
     @property
     def coords(self): return self.distinct(4)
@@ -308,13 +318,13 @@ class MotionData(dict):
     @property
     def mapping(self): return warn_or_return_first(self.mappings)
     @property
-    def run_keyname(self): return warn_or_return_first(self.runs_keyname)
-    @property
-    def prop(self): return self.props[0]
+    def run(self): return warn_or_return_first(self.runs)
     @property
     def who(self): return warn_or_return_first(self.whos)
     @property
-    def coord(self): return warn_or_return_first(self.coords)
+    def prop(self): return self.props()[0]
+    @property
+    def coord(self): return warn_or_return_first(self.props(1))   # TODO: remove coord
 
     @property
     def value(self):
@@ -422,8 +432,7 @@ def get_bones_info(armature=None):
     for armature in armatures:
         tree = bones_tree(armature=armature)
         List = keys_BFS(tree)
-        S += f"""
-TYPE_BODY = Literal{List}
+        S += f"""TYPE_BODY = Literal{List}
 BONES_TREE = {tree}"""
     return S
 
@@ -592,7 +601,7 @@ def apply(who: Union[str, int], mapping: Optional[TYPE_MAPPING], **kwargs):
     if MOTION_DATA is None:
         raise ValueError('Failed to load motion data')
     data = MOTION_DATA(mapping='smplx', who=who)
-    for r in data.runs_keyname:
+    for r in data.runs:
         run = getattr(Run()[r], r)
         run(data, mapping=mapping, **kwargs)
 
@@ -892,17 +901,17 @@ def apply_pose(
 
     start = 0
     if trans is not None:
-        trans = Vector((trans[0], trans[1], trans[2]))
-        add_keyframe(action, f'pose.bones["{bones[0]}"].location', frame, trans)
+        add_keyframe(action, f'location', frame, trans)
+        # add_keyframe(action, f'pose.bones["{bones[0]}"].location', frame, trans, f'0{bones[0]}')
         start = 1
 
     # Insert rotation keyframes for each bone
     for i, rot in enumerate(rots, start=start):  # Skip root!
-        bone_name = bones[i]
+        bone = bones[i]
         if bone_rot == 'QUATERNION':
-            add_keyframe(action, f'pose.bones["{bone_name}"].rotation_quaternion', frame, rot)
+            add_keyframe(action, f'pose.bones["{bone}"].rotation_quaternion', frame, rot, f'{i}_{bone}')
         else:
-            add_keyframe(action, f'pose.bones["{bone_name}"].rotation_euler', frame, rot)
+            add_keyframe(action, f'pose.bones["{bone}"].rotation_euler', frame, rot, f'{i}_{bone}')
     return action
 
 

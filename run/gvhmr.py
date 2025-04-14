@@ -51,8 +51,6 @@ def gvhmr(
     pose = data(prop='body_pose', coord='global').value
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3|4)
 
-    with new_action(armature, ';'.join([data.who, data.run_keyname])) as action:
+    with new_action(armature, ';'.join([data.who, data.run])) as action:
         for f in _Range:
             apply_pose(action=action, pose=pose[f], trans=translation[f], frame=f + 1, bones=BODY, bone_rot=bone_rot, **kwargs)
-
-    Log.info(f'done')
