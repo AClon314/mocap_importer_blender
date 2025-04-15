@@ -146,7 +146,7 @@ def add_keyframes(
                 update() if F % channels == 0 else None
         else:
             fcurve.keyframe_points.insert(frame, value=vectors[C])
-            update() if F % channels == 0 else None
+            update() if C % channels == 0 else None
         # Log.debug(f'is_multi={is_multi}, channels={channels}, shape={vectors.shape}', stack_info=False)
 
         if group and (not fcurve.group or fcurve.group.name != group):
@@ -622,8 +622,9 @@ def check_before_run(
     run: TYPE_RUN,
     key: str,
     data: MotionData,
-    Range: list,
-    mapping: Optional[TYPE_MAPPING] = None
+    mapping: Optional[TYPE_MAPPING] = None,
+    Range=[0, None],
+    base_frame: int = 0,
 ):
     """
     guess mapping[smpl,smplx]/Range_end/bone_rotation_mode[eular,quat]
@@ -654,7 +655,12 @@ def check_before_run(
         Log.info(f'range_frame[1] fallback to {Range[1]}')
     str_map = f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping
     Log.info(f'mapping from {str_map}')
-    return data, armature, rot, BONES, slice(*Range)
+
+    if base_frame >= 0:
+        base_frame += Range[0]
+    else:
+        base_frame += Range[1]
+    return data, armature, rot, BONES, slice(*Range), base_frame
 
 
 def apply(who: Union[str, int], mapping: Optional[TYPE_MAPPING], **kwargs):

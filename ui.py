@@ -1,8 +1,6 @@
 # object,mesh,scene,wm,render,anim,material,texture,light,armature,curve,text,node,image,view3d,ed
 """bind to blender logic."""
 import bpy
-import traceback
-from typing import Callable
 try:
     from .lib import DIR_MAPPING, Log, execute, items_mapping, items_motions, get_bones_info, load_data, add_mapping, apply
 except ImportError as e:
@@ -37,6 +35,14 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         items=items_mapping,
         default=0,
     )  # type: ignore
+    base_frame: bpy.props.IntProperty(
+        name='Basis',
+        description='could set -1(last) or 0(first) frame as origin location for offset calculation',
+        default=0,
+        soft_min=-1,
+        soft_max=0,
+        step=1,
+    )  # type: ignore
     # import_start: bpy.props.IntProperty(
     #     name='Start',
     #     description='start frame to import',
@@ -49,14 +55,6 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
     #     default=100,
     #     description='end frame to import',
     # )   # type: ignore
-    ibone: bpy.props.IntProperty(
-        name='bone index',
-        description='bone index to bind, for debug',
-        default=22,
-        min=0,
-        max=24,
-        step=1,
-    )  # type: ignore
     debug_kwargs: bpy.props.StringProperty(
         name='kwargs',
         description='kwargs for debug',
@@ -106,6 +104,9 @@ class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
         split.operator('armature.add_mapping', icon='ADD')
         split.operator('wm.open_dir_mapping', icon='FILE_FOLDER')
 
+        row = layout.row()
+        row.prop(props, 'base_frame')
+
         # row = layout.row(align=True)
         # row.prop(props, 'import_start')
         # row.prop(props, 'import_end')
@@ -118,8 +119,6 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
     def draw(self, context):
         layout = Layout(self)
         props = Props(context)
-        row = layout.row()
-        row.prop(props, 'ibone')
         row = layout.row()
         row.operator('armature.get_bones_info', icon='BONE_DATA')
         row = layout.row()
@@ -137,7 +136,7 @@ class ApplyMocap_Operator(bpy.types.Operator):
         props = Props(context)
         mapping = None if props.mapping == 'Auto detect' else props.mapping
         kwargs = eval(f'dict({props.debug_kwargs})')
-        apply(props.motions, mapping=mapping, ibone=props.ibone + 1, **kwargs)
+        apply(props.motions, mapping=mapping, base_frame=props.base_frame, **kwargs)
         return {'FINISHED'}
 
 

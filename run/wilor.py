@@ -3,8 +3,9 @@ from ..lib import *
 
 def wilor(
     data: MotionData,
-    Range=[0, None],
     mapping: Optional[TYPE_MAPPING] = None,
+    Range=[0, None],
+    base_frame=0,
     **kwargs
 ):
     """
@@ -19,7 +20,7 @@ def wilor(
     wilor(data('smplx', 'wilor', person=0))
     ```
     """
-    data, armature, bone_rot, HAND, _Range = check_before_run('wilor', 'HANDS', data, Range, mapping)
+    data, armature, rot, HAND, Slice, base_frame = check_before_run('wilor', 'HANDS', data, mapping, Range, base_frame)
 
     # rotate = data(prop='global_orient').value
     # rotate = rotate.reshape(-1, 1, rotate.shape[-1])
@@ -27,4 +28,5 @@ def wilor(
     # pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3|4)
 
     with bpy_action(armature, ';'.join([data.who, data.run])) as action:
-        pose_apply(action=action, pose=pose, frame=1, bones=HAND, rot=bone_rot, **kwargs)
+        pose_reset(action, HAND, rot)
+        pose_apply(action=action, pose=pose, bones=HAND, rot=rot, **kwargs)
