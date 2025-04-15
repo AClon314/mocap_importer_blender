@@ -14,18 +14,13 @@ BL_SPACE = 'VIEW_3D'
 BL_REGION = 'UI'
 BL_CONTEXT = 'objectmode'
 def Props(context): return context.scene.mocap_importer
+def Layout(self) -> 'bpy.types.UILayout': return self.layout
 
 
 class Mocap_PropsGroup(bpy.types.PropertyGroup):
-    input_video: bpy.props.StringProperty(
+    input_file: bpy.props.StringProperty(
         name='Input',
-        description='Video',
-        default='input.mp4',
-        subtype='FILE_PATH',
-    )  # type: ignore
-    input_npz: bpy.props.StringProperty(
-        name='npz',
-        description='gvhmr/wilor ouput .npz file, generated from mocap_wrapper',
+        description='gvhmr/wilor ouput .npz file, generated from mocap_wrapper; or video like .mp4',
         default='mocap_example.npz',
         subtype='FILE_PATH',
         update=load_data,
@@ -85,16 +80,10 @@ class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
     bl_idname = BL_ID
 
     def draw(self, context):
-        layout = self.layout
+        layout = Layout(self)
         props = Props(context)
         row = layout.row()
-
-        row.prop(props, 'input_npz')
-        row = layout.row()
-        split = row.split(factor=0.75, align=True)
-        split.prop(props, 'mapping')
-        split.operator('armature.add_mapping', icon='ADD')
-        split.operator('wm.open_dir_mapping', icon='FILE_FOLDER')
+        row.prop(props, 'input_file')
 
         row = layout.row()
         row.prop(props, 'motions')
@@ -102,11 +91,24 @@ class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
         row = layout.row()
         row.operator('armature.load_mocap', icon='ARMATURE_DATA')
 
+
+class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
+    bl_label = 'Tweak'
+    bl_parent_id = BL_ID
+    bl_translation_context = 'Operator'
+
+    def draw(self, context):
+        layout = Layout(self)
+        props = Props(context)
+        row = layout.row()
+        split = row.split(factor=0.75, align=True)
+        split.prop(props, 'mapping')
+        split.operator('armature.add_mapping', icon='ADD')
+        split.operator('wm.open_dir_mapping', icon='FILE_FOLDER')
+
         # row = layout.row(align=True)
         # row.prop(props, 'import_start')
         # row.prop(props, 'import_end')
-
-        row = layout.row()
 
 
 class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
@@ -114,7 +116,7 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
     bl_label = 'Development'
 
     def draw(self, context):
-        layout = self.layout
+        layout = Layout(self)
         props = Props(context)
         row = layout.row()
         row.prop(props, 'ibone')
@@ -124,27 +126,15 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
         row.prop(props, 'debug_kwargs')
 
 
-class RUN_PT_Panel(DefaultPanel, bpy.types.Panel):
-    bl_label = 'Init'
-
-    def draw(self, context):
-        layout = self.layout
-        props = Props(context)
-        row = layout.row()
-        row.prop(props, 'input_video')
-
-
-class LoadMocap_Operator(bpy.types.Operator):
+class ApplyMocap_Operator(bpy.types.Operator):
     bl_idname = 'armature.load_mocap'
-    bl_label = 'Load mocap'
+    bl_label = 'Apply Mocap'
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = 'Load mocap data from npz file.'
+    bl_description = 'Apply Mocap data from npz file.'
 
     @execute
     def execute(self, context):
-        scene = context.scene
         props = Props(context)
-        input_npz = props.input_npz
         mapping = None if props.mapping == 'Auto detect' else props.mapping
         kwargs = eval(f'dict({props.debug_kwargs})')
         apply(props.motions, mapping=mapping, ibone=props.ibone + 1, **kwargs)

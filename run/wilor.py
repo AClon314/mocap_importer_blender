@@ -27,4 +27,4 @@ def wilor(
     # pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3|4)
 
     with bpy_action(armature, ';'.join([data.who, data.run])) as action:
-        pose_to_keyframes(action=action, pose=pose, frame=1, bones=HAND, rot=bone_rot, **kwargs)
+        pose_apply(action=action, pose=pose, frame=1, bones=HAND, rot=bone_rot, **kwargs)

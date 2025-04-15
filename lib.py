@@ -100,7 +100,7 @@ def load_data(self=None, context=None):
     global MOTION_DATA
     if MOTION_DATA is not None:
         del MOTION_DATA
-    file = bpy.context.scene.mocap_importer.input_npz   # type: ignore
+    file = bpy.context.scene.mocap_importer.input_file   # type: ignore
     MOTION_DATA = MotionData(npz=file)
 
 
@@ -110,6 +110,7 @@ def add_keyframes(
     frame: int,
     data_path: str,
     group='',
+    **kwargs
 ):
     """
     add/override fcurve
@@ -126,6 +127,7 @@ def add_keyframes(
     """
     fcurves = action.fcurves
     kw: dict = dict(data_path=data_path)
+    update = kwargs.pop('update', lambda: None)
     if isinstance(vectors[0], Number):
         is_multi = False
         channels = len(vectors)
@@ -141,8 +143,10 @@ def add_keyframes(
         if is_multi:
             for F in range(len(vectors)):
                 fcurve.keyframe_points.insert(frame + F, value=vectors[F][C])   # type: ignore
+                update() if F % channels == 0 else None
         else:
             fcurve.keyframe_points.insert(frame, value=vectors[C])
+            update() if F % channels == 0 else None
         # Log.debug(f'is_multi={is_multi}, channels={channels}, shape={vectors.shape}', stack_info=False)
 
         if group and (not fcurve.group or fcurve.group.name != group):
@@ -249,6 +253,48 @@ def bpy_action(
         obj.animation_data.action = old_action
     else:
         Log.info('No action to restore')
+
+
+@contextmanager
+def progress_mouse(*Range: float, is_percent=True):
+    """
+    Show 4-digit progress number on mouse cursor with UI freeze.
+
+    Args:
+        is_percent: if True, convert Range into 0~10000 for **‱**
+        Range: if Range is None and is_percent == True, fallback to 0~10000  
+        if len(Range) != 3 and is_percent == True, show **‱**, auto set step for 10 thousandths
+    """
+    wm: 'bpy.types.WindowManager' = bpy.context.window_manager  # type: ignore
+    R = list(Range)
+    if is_percent:
+        if len(Range) == 1:
+            R = [0, 10000, 10000 / Range[0]]
+        elif len(Range) == 2:
+            R = [0, 10000, 10000 / (Range[1] - Range[0])]
+    _step = R[2] if len(R) == 3 else 1
+    R = np.arange(*R)
+    wm.progress_begin(R[0], R[-1])
+    v = R[0]
+    Log.debug(f'progress🖱 {Range} → {R}', stack_info=False)
+
+    def update(Step: Optional[float] = None, Set: Optional[float] = None):
+        """
+        Args:
+            Set: Any value between min and max as set in progress_mouse(Range=...)"""
+        nonlocal v
+        old = v
+        if Set is not None:
+            v = Set
+        elif Step is None:
+            v += _step
+        else:
+            v += Step
+        wm.progress_update(v)
+        return v, old
+    yield update
+    Log.debug(f'progress🖱 end {v}')
+    wm.progress_end()
 
 
 class MotionData(dict):
@@ -893,7 +939,7 @@ def RotMat_to_quat(R: TN) -> TN:
 def quat_rotAxis(arr: TN) -> TN: return RotMat_to_quat(Rodrigues(arr))
 
 
-def pose_to_keyframes(
+def pose_apply(
     action: 'bpy.types.Action',
     bones: Sequence[str],
     pose: 'np.ndarray',
@@ -903,7 +949,7 @@ def pose_to_keyframes(
     frame=1,
     **kwargs
 ):
-    """Apply translation, pose, and shape to character using Action and F-Curves.
+    """Apply to keyframes, with translation, pose, and shape to character using Action and F-Curves.
 
     Args:
         bones: `index num` mapping to `bone names`
@@ -919,8 +965,10 @@ def pose_to_keyframes(
             rots = pose
         else:
             rots = quat(pose)
+        path = 'pose.bones["{}"].rotation_quaternion'
     else:
         rots = euler(pose)
+        path = 'pose.bones["{}"].rotation_euler'
 
     if transl is not None:
         if transl_base is not None:
@@ -929,11 +977,9 @@ def pose_to_keyframes(
         add_keyframes(action, transl, 1, f'pose.bones["{bones[0]}"].location', bones[0])
 
     bones = bones[1:] if bones[0] == 'root' else bones  # Skip root!
-    for i, B in enumerate(bones):
-        if rot == 'QUATERNION':
-            add_keyframes(action, rots[:, i], frame, f'pose.bones["{B}"].rotation_quaternion', B)
-        else:
-            add_keyframes(action, rots[:, i], frame, f'pose.bones["{B}"].rotation_euler', B)
+    with progress_mouse(len(bones) * len(rots)) as update:
+        for i, B in enumerate(bones):
+            add_keyframes(action, rots[:, i], frame, path.format(B), B, update=update)
     return action
 
 
@@ -943,16 +989,15 @@ def pose_reset(
     rot: TYPE_ROT = 'QUATERNION',
     frame=0,
 ):
-    """Reset bones to ZERO rotation at frame"""
+    """Reset to keyframes, with bones to ZERO rotation at `frame`"""
     if rot == 'QUATERNION':
         ZERO = [1, 0, 0, 0]
+        path = 'pose.bones["{}"].rotation_quaternion'
     else:
         ZERO = [0, 0, 0]
-    for i, B in enumerate(bones):
-        if rot == 'QUATERNION':
-            add_keyframes(action, [1, 0, 0, 0], frame, f'pose.bones["{B}"].rotation_quaternion', B)
-        else:
-            add_keyframes(action, [0, 0, 0], frame, f'pose.bones["{B}"].rotation_euler', B)
+        path = 'pose.bones["{}"].rotation_euler'
+    for B in bones:
+        add_keyframes(action, ZERO, frame, path.format(B), B)
     return action
 
 

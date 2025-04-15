@@ -1,6 +1,5 @@
 import bpy
 import logging
-from contextlib import contextmanager
 from typing import Optional, Sequence, Literal
 MSG_TRUNK = 256
 _PKG_ = __package__.split('.')[-1] if __package__ else __name__
@@ -96,19 +95,6 @@ def execute(func):
         delattr(Log, 'report')
         return ret
     return wrap
-
-
-@contextmanager
-def progress_mouse(Range: Sequence[float] = (0, 10000, 1)):
-    """上下文管理器，显示进度条"""
-    wm = bpy.context.window_manager
-    if not wm:
-        raise RuntimeError("No window manager found")
-    wm.progress_begin(Range[0], Range[1])
-    try:
-        yield wm.progress_update
-    finally:
-        wm.progress_end()
 
 
 class ModalTimerOperator(bpy.types.Operator):

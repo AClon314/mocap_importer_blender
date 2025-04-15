@@ -44,6 +44,7 @@ def gvhmr(
     ```
     """
     data, armature, rot, BODY, Slice = check_before_run('gvhmr', 'BODY', data, Range, mapping)
+    BODY = BODY[:23]
     transl = data(prop='transl', coord='global').value[Slice]
     rotate = data(prop='global_orient', coord='global').value[Slice]
     rotate = rotate.reshape(-1, 1, rotate.shape[-1])
@@ -51,5 +52,5 @@ def gvhmr(
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3 or 4)
 
     with bpy_action(armature, ';'.join([data.who, data.run])) as action:
-        pose_reset(action, BODY[:23], rot)
-        pose_to_keyframes(action=action, pose=pose, transl=transl, transl_base=transl[Slice.start], bones=BODY[:23], rot=rot, **kwargs)
+        pose_reset(action, BODY, rot)
+        pose_apply(action=action, pose=pose, transl=transl, transl_base=transl[Slice.start], bones=BODY, rot=rot, **kwargs)
