@@ -60,7 +60,7 @@ def mano_to_smplx(smplx_body_gvhmr, mano_hand_hamer):
 
 def wilor(
     data: MotionData,
-    mapping: Optional[TYPE_MAPPING] = None,
+    mapping: TYPE_MAPPING | None = None,
     Range=[0, None],
     base_frame=0,
     **kwargs

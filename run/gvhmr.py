@@ -3,7 +3,7 @@ from ..lib import *
 
 def gvhmr(
     data: MotionData,
-    mapping: Optional[TYPE_MAPPING] = None,
+    mapping: TYPE_MAPPING | None = None,
     Range=[0, None],
     base_frame=0,
     **kwargs

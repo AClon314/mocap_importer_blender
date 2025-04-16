@@ -8,7 +8,7 @@ _LOG_ICON = {
     'WARNING': 'ERROR',
     'ERROR': 'CANCEL'
 }
-def Pop(dic: Optional[dict], key, default): return dic.pop(key, default) if dic else default
+def Pop(dic: dict | None, key, default): return dic.pop(key, default) if dic else default
 
 
 def msg_mouse(
@@ -32,7 +32,7 @@ extra={'mouse': True, 'report': True, 'log': True,
                 'OPERATOR','PROPERTY'][0]
 }"""
 
-    def _log(self, level, msg: str, args, exc_info=None, extra: Optional[dict] = None, stack_info=None, stacklevel=1):
+    def _log(self, level, msg: str, args, exc_info=None, extra: dict | None = None, stack_info=None, stacklevel=1):
         Level = logging.getLevelName(level)
         lvl: str = Pop(extra, 'lvl', Level)
         if level == logging.DEBUG:

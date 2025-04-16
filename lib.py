@@ -65,8 +65,8 @@ def Mod(Dir='mapping'):
     return mods
 
 
-def Map(Dir='mapping') -> Dict[Union[TYPE_MAPPING, str], ModuleType]: return Mod(Dir=Dir)
-def Run(Dir='run') -> Dict[Union[TYPE_RUN, str], ModuleType]: return Mod(Dir=Dir)
+def Map(Dir='mapping') -> Dict[TYPE_MAPPING | str, ModuleType]: return Mod(Dir=Dir)
+def Run(Dir='run') -> Dict[TYPE_RUN | str, ModuleType]: return Mod(Dir=Dir)
 
 
 def items_mapping(self=None, context=None):
@@ -106,11 +106,11 @@ def load_data(self=None, context=None):
 
 def add_keyframes(
     action: 'bpy.types.Action',
-    vectors: Union[Sequence[float], Vector],
+    vectors: Sequence[float] | Vector,
     frame: int,
     data_path: str,
     group='',
-    interpolation: Union[Literal['CONSTANT', 'LINEAR', 'BEZIER'], str] = 'BEZIER',
+    interpolation: Literal['CONSTANT', 'LINEAR', 'BEZIER'] | str = 'BEZIER',
     **kwargs
 ):
     """
@@ -202,7 +202,7 @@ def temp_override(area='NLA_EDITOR', mode: Literal['global', 'current'] = 'curre
 
 @contextmanager
 def bpy_action(
-    obj: Optional['bpy.types.Object'] = None,
+    obj: 'bpy.types.Object' | None = None,
     name='Action',
     nla_push=True,
 ):
@@ -281,7 +281,7 @@ def progress_mouse(*Range: float, is_percent=True):
     v = R[0]
     Log.debug(f'progress🖱 {Range} → {R}', stack_info=False)
 
-    def update(Step: Optional[float] = None, Set: Optional[float] = None):
+    def update(Step: float | None = None, Set: float | None = None):
         """
         Args:
             Set: Any value between min and max as set in progress_mouse(Range=...)"""
@@ -315,7 +315,7 @@ class MotionData(dict):
     def values(self) -> List[np.ndarray]:
         return list(super().values())
 
-    def __init__(self, /, *args, npz: Union[str, os.PathLike, None] = None, lazy=False, **kwargs):
+    def __init__(self, /, *args, npz: str | os.PathLike | None = None, lazy=False, **kwargs):
         """
         Inherit from dict
         Args:
@@ -331,9 +331,9 @@ class MotionData(dict):
     def __call__(
         self,
         *prop: TYPE_PROP | Literal['global', 'incam'],
-        mapping: Optional[TYPE_MAPPING] = None,
-        run: Optional[TYPE_RUN] = None,
-        who: Union[str, int, None] = None,
+        mapping: TYPE_MAPPING | None = None,
+        run: TYPE_RUN | None = None,
+        who: str | int | None = None,
         Range=lambda frame: 0 < frame < np.inf,
         # coord: Optional[Literal['global', 'incam']] = None,
     ):
@@ -408,7 +408,7 @@ class MotionData(dict):
         return self.keys()[0]
 
 
-def log_array(arr: Union[np.ndarray, list], name='ndarray'):
+def log_array(arr: np.ndarray | list, name='ndarray'):
     def recursive_convert(array):
         if isinstance(array, np.ndarray):
             return array.tolist()
@@ -434,14 +434,14 @@ def log_array(arr: Union[np.ndarray, list], name='ndarray'):
     return text
 
 
-def bone_to_dict(bone, whiteList: Optional[Sequence[str]] = None):
+def bone_to_dict(bone, whiteList: Sequence[str] | None = None):
     """bone to dict, Recursive calls to this function form a tree"""
     # if deep_max and deep > deep_max:
     #     raise ValueError(f'Bones tree too deep, {deep} > {deep_max}')
     return {child.name: bone_to_dict(child) for child in bone.children if in_or_skip(child.name, whiteList)}
 
 
-def bones_tree(armature: 'bpy.types.Object', whiteList: Optional[Sequence[str]] = None):
+def bones_tree(armature: 'bpy.types.Object', whiteList: Sequence[str] | None = None):
     """bones to dict tree"""
     if armature and armature.type == 'ARMATURE':
         for bone in armature.pose.bones:
@@ -515,7 +515,7 @@ def get_similar(list1, list2):
     return ret
 
 
-def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> Union[TYPE_MAPPING, None]:
+def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> TYPE_MAPPING | None:
     if obj.type != 'ARMATURE':
         return None
     bones = bones_tree(obj)
@@ -533,7 +533,7 @@ def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> Union[TYPE_MAPPIN
     return mapping  # type: ignore
 
 
-def get_mapping(mapping: Union[TYPE_MAPPING, None] = None, armature=None):
+def get_mapping(mapping: TYPE_MAPPING | None = None, armature=None):
     """
     import mapping module by name
     will set global variable BODY(temporary)
@@ -581,7 +581,7 @@ def get_selected_bones(armature=None, context=None):
     return bones
 
 
-def add_mapping(armatures: Optional[Sequence['bpy.types.Object']] = None, check=True):
+def add_mapping(armatures: Sequence['bpy.types.Object'] | None = None, check=True):
     """
     add mapping based on selected armatures
     """
@@ -626,7 +626,7 @@ def check_before_run(
     run: TYPE_RUN,
     key: str,
     data: MotionData,
-    mapping: Optional[TYPE_MAPPING] = None,
+    mapping: TYPE_MAPPING | None = None,
     Range=[0, None],
     base_frame: int = 0,
 ):
@@ -667,7 +667,7 @@ def check_before_run(
     return data, armature, rot, BONES, slice(*Range), base_frame
 
 
-def apply(who: Union[str, int], mapping: Optional[TYPE_MAPPING], **kwargs):
+def apply(who: str | int, mapping: TYPE_MAPPING | None, **kwargs):
     global MOTION_DATA
     if MOTION_DATA is None:
         raise ValueError('Failed to load motion data')
@@ -953,8 +953,8 @@ def pose_apply(
     action: 'bpy.types.Action',
     bones: Sequence[str],
     pose: 'np.ndarray',
-    transl: Optional['np.ndarray'] = None,
-    transl_base: Optional['np.ndarray'] = None,
+    transl: 'np.ndarray' | None = None,
+    transl_base: 'np.ndarray' | None = None,
     rot: TYPE_ROT = 'QUATERNION',
     frame=1,
     reset=True,
