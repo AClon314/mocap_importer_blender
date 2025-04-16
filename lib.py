@@ -202,7 +202,7 @@ def temp_override(area='NLA_EDITOR', mode: Literal['global', 'current'] = 'curre
 
 @contextmanager
 def bpy_action(
-    obj: 'bpy.types.Object' | None = None,
+    obj: 'bpy.types.Object | None' = None,
     name='Action',
     nla_push=True,
 ):
@@ -953,8 +953,8 @@ def pose_apply(
     action: 'bpy.types.Action',
     bones: Sequence[str],
     pose: 'np.ndarray',
-    transl: 'np.ndarray' | None = None,
-    transl_base: 'np.ndarray' | None = None,
+    transl: 'np.ndarray | None' = None,
+    transl_base: 'np.ndarray | None' = None,
     rot: TYPE_ROT = 'QUATERNION',
     frame=1,
     reset=True,
