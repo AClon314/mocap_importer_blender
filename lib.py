@@ -110,6 +110,7 @@ def add_keyframes(
     frame: int,
     data_path: str,
     group='',
+    interpolation: Union[Literal['CONSTANT', 'LINEAR', 'BEZIER'], str] = 'BEZIER',
     **kwargs
 ):
     """
@@ -142,10 +143,12 @@ def add_keyframes(
 
         if is_multi:
             for F in range(len(vectors)):
-                fcurve.keyframe_points.insert(frame + F, value=vectors[F][C])   # type: ignore
+                keyframe = fcurve.keyframe_points.insert(frame + F, value=vectors[F][C])   # type: ignore
+                keyframe.interpolation = interpolation  # type: ignore
                 update() if F % channels == 0 else None
         else:
-            fcurve.keyframe_points.insert(frame, value=vectors[C])
+            keyframe = fcurve.keyframe_points.insert(frame, value=vectors[C])
+            keyframe.interpolation = interpolation  # type: ignore
             update() if C % channels == 0 else None
         # Log.debug(f'is_multi={is_multi}, channels={channels}, shape={vectors.shape}', stack_info=False)
 
@@ -273,7 +276,7 @@ def progress_mouse(*Range: float, is_percent=True):
         elif len(Range) == 2:
             R = [0, 10000, 10000 / (Range[1] - Range[0])]
     _step = R[2] if len(R) == 3 else 1
-    R = np.arange(*R)
+    R = np.arange(*R, dtype=np.float32)
     wm.progress_begin(R[0], R[-1])
     v = R[0]
     Log.debug(f'progress🖱 {Range} → {R}', stack_info=False)
@@ -327,11 +330,12 @@ class MotionData(dict):
 
     def __call__(
         self,
+        *prop: TYPE_PROP | Literal['global', 'incam'],
         mapping: Optional[TYPE_MAPPING] = None,
         run: Optional[TYPE_RUN] = None,
         who: Union[str, int, None] = None,
-        prop: Optional[TYPE_PROP] = None,
-        coord: Optional[Literal['global', 'incam']] = None,
+        Range=lambda frame: 0 < frame < np.inf,
+        # coord: Optional[Literal['global', 'incam']] = None,
     ):
         # Log.debug(f'self.__dict__={self.__dict__}')
         D = MotionData(npz=self.npz, lazy=True)
@@ -339,7 +343,8 @@ class MotionData(dict):
             who = f'person{who}'
 
         for k, v in self.items():
-            is_in = [in_or_skip(args, k, ';{};') for args in [mapping, run, who, prop, coord]]
+            # TODO: Range (int)
+            is_in = [in_or_skip(args, k, ';{};') for args in [mapping, run, who, *prop]]
             is_in = all(is_in)
             if is_in:
                 D[k] = v
@@ -373,8 +378,8 @@ class MotionData(dict):
             `['*_pose', 'global_orient', 'transl', 'betas', your_customkeys]`"""
         return self.distinct(col + 3)
 
-    @property
-    def coords(self): return self.distinct(4)
+    # @property
+    # def coords(self): return self.distinct(4)
 
     @property
     def mapping(self): return warn_or_return_first(self.mappings)
@@ -382,10 +387,9 @@ class MotionData(dict):
     def run(self): return warn_or_return_first(self.runs)
     @property
     def who(self): return warn_or_return_first(self.whos)
-    @property
-    def prop(self): return self.props()[0]
-    @property
-    def coord(self): return warn_or_return_first(self.props(1))   # TODO: remove coord
+    def prop(self, col=0): return self.props(col)[0]
+    # @property
+    # def coord(self): return warn_or_return_first(self.props(1))   # TODO: remove coord
 
     @property
     def value(self):
@@ -525,7 +529,7 @@ def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> Union[TYPE_MAPPIN
             mapping = map
     if mapping and select:
         bpy.context.view_layer.objects.active = obj
-    Log.info(f'Guess mapping: {mapping} with {max_similar:.2f}')
+    Log.info(f'Guess mapping to: {mapping} with {max_similar:.2f}')
     return mapping  # type: ignore
 
 
@@ -651,7 +655,7 @@ def check_before_run(
     BONES = getattr(Map()[mapping], key, 'BODY')   # type:ignore
 
     if is_range and Range[1] is None:
-        Range[1] = len(data(prop='global_orient').value)    # TODO: use data.frames
+        Range[1] = len(data('global_orient').value)    # TODO: use data.frames
         Log.info(f'range_frame[1] fallback to {Range[1]}')
     str_map = f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping
     Log.info(f'mapping from {str_map}')
@@ -953,6 +957,7 @@ def pose_apply(
     transl_base: Optional['np.ndarray'] = None,
     rot: TYPE_ROT = 'QUATERNION',
     frame=1,
+    reset=True,
     **kwargs
 ):
     """Apply to keyframes, with translation, pose, and shape to character using Action and F-Curves.
@@ -963,6 +968,8 @@ def pose_apply(
         rot: blender rotation mode
         frame: begin frame
     """
+    if reset:
+        pose_reset(action, bones, rot)
     method = str(kwargs.get('quat', 0))[0]
     if rot == 'QUATERNION':
         if method == 'a':  # axis
@@ -1003,7 +1010,7 @@ def pose_reset(
         ZERO = [0, 0, 0]
         path = 'pose.bones["{}"].rotation_euler'
     for B in bones:
-        add_keyframes(action, ZERO, frame, path.format(B), B)
+        add_keyframes(action, ZERO, frame, path.format(B), B, 'CONSTANT')
     return action
 
 
