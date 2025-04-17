@@ -1013,6 +1013,7 @@ def pose_apply(
     is_clean = clean_th > 0
     is_decimate = decimate_th > 0
     if is_clean or is_decimate:
+        # TODO: FK转IK，旋转→位置，平滑动画
         # TODO: ⭐复制优化前动画，二分法调整threshold直到用户满意（方便后期手工曲线编辑）⭐
         # TODO: 增加armatures参数，未处理多骨架同时导入
         with temp_override(area='GRAPH_EDITOR', mode='global') as context:
