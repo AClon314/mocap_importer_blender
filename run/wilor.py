@@ -102,11 +102,10 @@ def wilor(
     wilor(data('smplx', 'wilor', person=0))
     ```
     """
-    data, armature, rot, HAND, Slice, base_frame = check_before_run('wilor', 'HANDS', data, mapping, Range, base_frame)
-
+    data, HAND, armature, rot, Slice = check_before_run(data, 'HANDS', 'wilor', mapping, Range)
     # rotate = data(prop='global_orient').value
     # rotate = rotate.reshape(-1, 1, rotate.shape[-1])
-    pose = data('hand_pose').value
+    pose = data('hand_pose').value[Slice]
     # pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3|4)
 
     _, _, pose, r = mano_to_smplx(kwargs.get('body'), pose)

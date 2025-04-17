@@ -390,12 +390,14 @@ class MotionData(dict):
     def runs(self): return self.distinct(1)
     @property
     def whos(self): return self.distinct(2)
+    @property
+    def begins(self): return self.distinct(3)
 
     def props(self, col=0):
         """
         Returns:
             `['*_pose', 'global_orient', 'transl', 'betas', your_customkeys]`"""
-        return self.distinct(col + 3)
+        return self.distinct(col + 4)
 
     # @property
     # def coords(self): return self.distinct(4)
@@ -407,8 +409,6 @@ class MotionData(dict):
     @property
     def who(self): return warn_or_return_first(self.whos)
     def prop(self, col=0): return self.props(col)[0]
-    # @property
-    # def coord(self): return warn_or_return_first(self.props(1))   # TODO: remove coord
 
     @property
     def value(self):
@@ -642,9 +642,9 @@ def add_mapping(armatures: Sequence['bpy.types.Object'] | None = None, check=Tru
 
 
 def check_before_run(
-    run: TYPE_RUN,
-    key: str,
     data: MotionData,
+    key: str,
+    run: TYPE_RUN,
     mapping: TYPE_MAPPING | None = None,
     Range=[0, None],
 ):
@@ -678,7 +678,7 @@ def check_before_run(
     str_map = f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping
     Log.debug(f'mapping from {str_map}')
 
-    return data, armature, rot, BONES, slice(*Range)
+    return data, BONES, armature, rot, slice(*Range)
 
 
 def apply(who: str | int, mapping: TYPE_MAPPING | None, **kwargs):
