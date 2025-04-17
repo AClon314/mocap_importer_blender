@@ -7,11 +7,12 @@ import bpy
 import sys
 import importlib
 import numpy as np
-from .logger import Log, execute
+from .logger import Log, execute, _PKG_
+from time import time
 from contextlib import contextmanager
 from numbers import Number
 from types import ModuleType
-from typing import Any, Dict, List, Optional, Sequence, Union, Literal, TypeVar, get_args
+from typing import Any, Dict, Generator, List, Sequence, Literal, TypeVar, get_args
 DIR_SELF = os.path.dirname(__file__)
 DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
 MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
@@ -160,44 +161,48 @@ def add_keyframes(
 
 
 @contextmanager
-def temp_override(area='NLA_EDITOR', mode: Literal['global', 'current'] = 'current'):
+def temp_override(
+    area='NLA_EDITOR',
+    mode: Literal['global', 'current'] = 'current'
+):
     """
     Not recommended to use, all **`bpy.ops`** are **slower** than **pure data** manipulation.
 
     usage:
     ```python
-    with bpy.context.temp_override(**temp_override()):
-        bpy.ops.nla.action_pushdown(override)
+    with temp_override(area='GRAPH_EDITOR', mode='global') as context:
+        print(bpy.context == context)   # True
     ```
     """
+    override = {}
     if mode == 'current':
         win = bpy.context.window
         scr = win.screen
         areas = [a for a in scr.areas if a.type == area]
         if not areas:
             raise RuntimeError(f"No area of type '{area}' found in the current screen.")
-        region = areas[0].regions[0]
+        # region = areas[0].regions[0]
         override = {
-            'window': win,
+            # 'window': win,
             'screen': scr,
             'area': areas[0],
-            'region': region,
-            'scene': bpy.context.scene,
-            'object': bpy.context.active_object,
+            # 'region': region,
+            # 'scene': bpy.context.scene,
+            # 'object': bpy.context.active_object,
         }
-        Log.debug(f'Context override: {override}')
     elif mode == 'global':
         Break = False
         for screen in bpy.data.screens:
-            for area in screen.areas:
-                if area.type == type:
-                    override = {"area": area, "screen": screen}
+            for _area in screen.areas:
+                if _area.type == area:
+                    override = {"area": _area, "screen": screen}
                     Break = True
                     break
             if Break:
                 break
+    Log.debug(f'Context override: {override}')
     with bpy.context.temp_override(**override):
-        yield
+        yield bpy.context
 
 
 @contextmanager
@@ -255,7 +260,7 @@ def bpy_action(
     if old_action and obj and obj.animation_data and obj.animation_data.action:
         obj.animation_data.action = old_action
     else:
-        Log.info('No action to restore')
+        Log.debug('No action to restore')
 
 
 @contextmanager
@@ -264,39 +269,53 @@ def progress_mouse(*Range: float, is_percent=True):
     Show 4-digit progress number on mouse cursor with UI freeze.
 
     Args:
-        is_percent: if True, convert Range into 0~10000 for **‱**
-        Range: if Range is None and is_percent == True, fallback to 0~10000  
+        is_percent: if True, convert Range into 0\\~10000 for **‱**
+        Range: if Range is None and is_percent == True, fallback to 0\\~10000  
         if len(Range) != 3 and is_percent == True, show **‱**, auto set step for 10 thousandths
+        Mod: reduce UI update. if Mod == 0, will auto decide Mod number.
     """
+    MAX = 19998
     wm: 'bpy.types.WindowManager' = bpy.context.window_manager  # type: ignore
     R = list(Range)
     if is_percent:
         if len(Range) == 1:
-            R = [0, 10000, 10000 / Range[0]]
+            R = [0, MAX, MAX / Range[0]]
         elif len(Range) == 2:
-            R = [0, 10000, 10000 / (Range[1] - Range[0])]
+            R = [0, MAX, MAX / (Range[1] - Range[0])]
     _step = R[2] if len(R) == 3 else 1
     R = np.arange(*R, dtype=np.float32)
     wm.progress_begin(R[0], R[-1])
-    v = R[0]
     Log.debug(f'progress🖱 {Range} → {R}', stack_info=False)
+    i = 0
+    v = R[0]
+    mod = 1
+    timer = time()
 
     def update(Step: float | None = None, Set: float | None = None):
         """
         Args:
-            Set: Any value between min and max as set in progress_mouse(Range=...)"""
-        nonlocal v
-        old = v
+            Set: Any value between min and max as set in progress_mouse(Range=...)
+        """
+        nonlocal i, v, mod, timer
+        i += 1
         if Set is not None:
             v = Set
         elif Step is None:
             v += _step
         else:
             v += Step
-        wm.progress_update(v)
-        return v, old
+        if Set or i % mod < 1:
+            if timer > 0:
+                t = timer
+                timer = time()
+                if timer - t < 0.25:
+                    mod *= 2
+                else:
+                    timer = -1
+            wm.progress_update(v)
+        return v
     yield update
-    Log.debug(f'progress🖱 end {v}')
+    Log.debug(f'progress🖱 end {v}', stack_info=True)
     wm.progress_end()
 
 
@@ -628,7 +647,6 @@ def check_before_run(
     data: MotionData,
     mapping: TYPE_MAPPING | None = None,
     Range=[0, None],
-    base_frame: int = 0,
 ):
     """
     guess mapping[smpl,smplx]/Range_end/bone_rotation_mode[eular,quat]
@@ -658,13 +676,9 @@ def check_before_run(
         Range[1] = len(data('global_orient').value)    # TODO: use data.frames
         Log.info(f'range_frame[1] fallback to {Range[1]}')
     str_map = f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping
-    Log.info(f'mapping from {str_map}')
+    Log.debug(f'mapping from {str_map}')
 
-    if base_frame >= 0:
-        base_frame += Range[0]
-    else:
-        base_frame += Range[1]
-    return data, armature, rot, BONES, slice(*Range), base_frame
+    return data, armature, rot, BONES, slice(*Range)
 
 
 def apply(who: str | int, mapping: TYPE_MAPPING | None, **kwargs):
@@ -957,7 +971,8 @@ def pose_apply(
     transl_base: 'np.ndarray | None' = None,
     rot: TYPE_ROT = 'QUATERNION',
     frame=1,
-    reset=True,
+    clean_th=0.002,
+    decimate_th=0.005,
     **kwargs
 ):
     """Apply to keyframes, with translation, pose, and shape to character using Action and F-Curves.
@@ -967,9 +982,9 @@ def pose_apply(
         transl_base: if **NOT None**, transl will be **relative** to transl_base
         rot: blender rotation mode
         frame: begin frame
+        clean_th: -1 to disable,suggest 0.001~0.005; **keep default bezier curve handle ⚫**, clean nearby keyframes if `current-previous > threshold`; aims to remove time noise/tiny shake
+        decimate_th: -1 to disable, suggest 0.001~0.1; **will modify curve handle ⚫→🔶**, decide to decimate current frame if `error=new-old < threshold`; aims to be editable
     """
-    if reset:
-        pose_reset(action, bones, rot)
     method = str(kwargs.get('quat', 0))[0]
     if rot == 'QUATERNION':
         if method == 'a':  # axis
@@ -993,6 +1008,28 @@ def pose_apply(
     with progress_mouse(len(bones) * len(rots)) as update:
         for i, B in enumerate(bones):
             add_keyframes(action, rots[:, i], frame, path.format(B), B, update=update)
+
+    is_clean = clean_th > 0
+    is_decimate = decimate_th > 0
+    if is_clean or is_decimate:
+        with temp_override(area='GRAPH_EDITOR', mode='global') as context:
+            obj = context.active_object
+            old_show = context.area.spaces[0].dopesheet.show_only_selected
+            context.area.spaces[0].dopesheet.show_only_selected = True
+
+            old_bones = [b for b in obj.pose.bones if not b.bone.select]
+            for b in old_bones:
+                b.bone.select = True
+
+            if is_clean:
+                bpy.ops.graph.clean(threshold=clean_th, channels=False)
+            if is_decimate:
+                bpy.ops.graph.decimate(remove_error_margin=decimate_th, mode='ERROR')
+
+            context.area.spaces[0].dopesheet.show_only_selected = old_show
+            for b in old_bones:
+                b.bone.select = False
+    pose_reset(action, bones, rot)
     return action
 
 

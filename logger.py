@@ -1,6 +1,6 @@
 import bpy
 import logging
-from typing import Optional, Sequence, Literal
+from typing import Literal
 MSG_TRUNK = 256
 _PKG_ = __package__.split('.')[-1] if __package__ else __name__
 _LOG_ICON = {
@@ -32,23 +32,22 @@ extra={'mouse': True, 'report': True, 'log': True,
                 'OPERATOR','PROPERTY'][0]
 }"""
 
-    def _log(self, level, msg: str, args, exc_info=None, extra: dict | None = None, stack_info=None, stacklevel=1):
+    def _log(self, level, msg: str, args, exc_info=None, extra: dict | None = None, stack_info=False, stacklevel=1):
         Level = logging.getLevelName(level)
         lvl: str = Pop(extra, 'lvl', Level)
+        # stack_info = False if stack_info == None else stack_info
         if level == logging.DEBUG:
             is_mouse = False
             is_report = False
-            stack_info = True if stack_info == None else stack_info
         else:
             is_mouse: bool = Pop(extra, 'mouse', True)
             is_report: bool = Pop(extra, 'report', True)
-            stack_info = False if stack_info == None else stack_info
         is_log: bool = Pop(extra, 'log', not is_report)
         kwargs = dict(level=level, msg=msg, args=args, exc_info=exc_info, extra=extra, stack_info=stack_info, stacklevel=stacklevel)
         try:
             if is_mouse:
                 icon: str = Pop(extra, 'icon', _LOG_ICON.get(Level, 'NONE'))    # type: ignore
-                _msg = msg if len(msg) > MSG_TRUNK else ''
+                _msg = msg if len(msg) > MSG_TRUNK else _PKG_
                 msg_mouse(title=msg[:MSG_TRUNK], msg=_msg, icon=icon)
             if is_report and hasattr(self, 'report'):
                 self.report(type={lvl}, message=msg)   # type: ignore

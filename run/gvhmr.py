@@ -20,7 +20,7 @@ def gvhmr(
     gvhmr(data('smplx', 'gvhmr', person=0))
     ```
     """
-    data, armature, rot, BODY, Slice, base_frame = check_before_run('gvhmr', 'BODY', data, mapping, Range, base_frame)
+    data, armature, rot, BODY, Slice = check_before_run('gvhmr', 'BODY', data, mapping, Range)
     BODY = BODY[:23]
     transl = data('transl', 'global').value[Slice]
     rotate = data('global_orient', 'global').value[Slice]

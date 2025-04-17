@@ -2,7 +2,7 @@
 """bind to blender logic."""
 import bpy
 try:
-    from .lib import DIR_MAPPING, Log, execute, items_mapping, items_motions, get_bones_info, load_data, add_mapping, apply
+    from .lib import DIR_MAPPING, _PKG_, Log, execute, items_mapping, items_motions, get_bones_info, load_data, add_mapping, apply
 except ImportError as e:
     print(f'ui ⚠️ {e}')
     from lib import *
@@ -36,25 +36,37 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         default=0,
     )  # type: ignore
     base_frame: bpy.props.IntProperty(
-        name='Basis',
+        name='Frame',
         description='could set -1(last) or 0(first) frame as origin location for offset calculation',
+        # subtype='FACTOR',
         default=0,
         soft_min=-1,
         soft_max=0,
         step=1,
     )  # type: ignore
-    # import_start: bpy.props.IntProperty(
-    #     name='Start',
-    #     description='start frame to import',
-    #     default=0,
-    #     min=0,
-    #     # update=update_pose,
-    # )   # type: ignore
-    # import_end: bpy.props.IntProperty(
-    #     name='End',
-    #     default=100,
-    #     description='end frame to import',
-    # )   # type: ignore
+    clean_th: bpy.props.FloatProperty(
+        name='Cleanup',
+        description='Simplify F-Curves by removing closely spaced keyframes',
+        translation_context='Operator',
+        subtype='FACTOR',
+        default=0,
+        max=1,
+        soft_min=0,
+        soft_max=0.05,
+        step=1,
+        precision=3,
+    )  # type: ignore
+    decimate_th: bpy.props.FloatProperty(
+        name='Decimate',
+        description='How much the new decimated curve is allowed to deviate from the original',
+        subtype='FACTOR',
+        default=0.01,
+        max=1,
+        soft_min=0,
+        soft_max=0.05,
+        step=1,
+        precision=3,
+    )  # type: ignore
     debug_kwargs: bpy.props.StringProperty(
         name='kwargs',
         description='kwargs for debug',
@@ -73,21 +85,28 @@ class ExpandedPanel(DefaultPanel):
     bl_options = {"HEADER_LAYOUT_EXPAND"}
 
 
+class MAIN_PT_Panel(ExpandedPanel, bpy.types.Panel):
+    bl_label = ''
+    _bl_label = 'Motion tracking tools'
+    bl_description = _PKG_
+    bl_idname = BL_ID
+    def draw(self, context): ...
+    def draw_header(self, context): Layout(self).label(text=self._bl_label, icon='OUTLINER_OB_ARMATURE')
+
+
 class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
     bl_label = 'Import'
-    bl_idname = BL_ID
+    bl_parent_id = BL_ID
 
     def draw(self, context):
         layout = Layout(self)
         props = Props(context)
-        row = layout.row()
-        row.prop(props, 'input_file')
+        col = layout.column(align=True)
+        col.prop(props, 'input_file')
+        col.prop(props, 'motions')
 
-        row = layout.row()
-        row.prop(props, 'motions')
-
-        row = layout.row()
-        row.operator('armature.load_mocap', icon='ARMATURE_DATA')
+        col = layout.column()
+        col.operator('armature.load_mocap', icon='ARMATURE_DATA')
 
 
 class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
@@ -98,23 +117,27 @@ class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
     def draw(self, context):
         layout = Layout(self)
         props = Props(context)
-        row = layout.row()
-        split = row.split(factor=0.75, align=True)
-        split.prop(props, 'mapping')
-        split.operator('armature.add_mapping', icon='ADD')
-        split.operator('wm.open_dir_mapping', icon='FILE_FOLDER')
+        col = layout.column()
+        row = layout.row(align=True)
+        row.prop(props, 'mapping')
+        row.operator('armature.add_mapping', icon='ADD', text='')
+        row.operator('wm.open_dir_mapping', icon='FILE_FOLDER', text='')
 
-        row = layout.row()
-        row.prop(props, 'base_frame')
+        _row = col.row(align=True)
+        _row.prop(props, 'base_frame')
 
-        # row = layout.row(align=True)
-        # row.prop(props, 'import_start')
-        # row.prop(props, 'import_end')
+        row = col.row(align=True)
+        _row = row.row(align=True)
+        _row.prop(props, 'clean_th')
+        _row.active = props.clean_th > 0
+        _row = row.row(align=True)
+        _row.prop(props, 'decimate_th')
+        _row.active = props.decimate_th > 0
 
 
 class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
-    bl_parent_id = BL_ID
     bl_label = 'Development'
+    bl_parent_id = BL_ID
 
     def draw(self, context):
         layout = Layout(self)
@@ -136,7 +159,7 @@ class ApplyMocap_Operator(bpy.types.Operator):
         props = Props(context)
         mapping = None if props.mapping == 'Auto detect' else props.mapping
         kwargs = eval(f'dict({props.debug_kwargs})')
-        apply(props.motions, mapping=mapping, base_frame=props.base_frame, **kwargs)
+        apply(props.motions, mapping=mapping, base_frame=props.base_frame, clean_th=props.clean_th, decimate_th=props.decimate_th, **kwargs)
         return {'FINISHED'}
 
 
