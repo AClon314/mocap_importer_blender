@@ -57,7 +57,7 @@ BONES_TREE = {
                                                                                        'm_avg_R_Collar': {'m_avg_R_Shoulder': {'m_avg_R_Elbow': {'m_avg_R_Wrist': {'m_avg_R_Hand': {}}}}}}}}}}
 }
 
-from ..lib import TYPE_I18N
+from ..b import TYPE_I18N
 HELP: Dict[TYPE_I18N, str | None] = {
     'en_US': __doc__,
     'zh_HANS': """有24根骨骼的SMPL骨骼结构""",

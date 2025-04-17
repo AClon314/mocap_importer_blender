@@ -68,8 +68,8 @@ BONES_TREE = {
                                                                                                                              'right_thumb1': {'right_thumb2': {'right_thumb3': {}}}}}}}}}}}}
 }
 
-from .. import lib
-HELP: Dict[lib.TYPE_I18N, str | None] = {
+from ..b import TYPE_I18N
+HELP: Dict[TYPE_I18N, str | None] = {
     'en_US': __doc__,
     'zh_HANS': """SMPL 的更新版本。增加了 3 块头骨和 2*5*3=30 块手骨""",
 }

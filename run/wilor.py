@@ -1,4 +1,5 @@
 from ..lib import *
+from ..b import check_before_run, pose_apply, bpy_action
 
 
 def compute_global_rotation(pose_axis_anges, joint_idx):
@@ -10,7 +11,12 @@ def compute_global_rotation(pose_axis_anges, joint_idx):
         np.array: (3, 3)
     """
     global_rotation = np.eye(3)
-    parents = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19]
+    parents = [
+        -1, 0, 0, 0, 1,
+        2, 3, 4, 5, 6, 7,
+        8, 9, 9, 9, 12,
+        13, 14, 16, 17, 18,
+        19]
     while joint_idx != -1:
         joint_rotation = Rodrigues(pose_axis_anges[joint_idx])
         global_rotation = joint_rotation @ global_rotation
@@ -49,10 +55,11 @@ def mano_to_smplx(smplx_body_gvhmr, mano_hand_hamer):
     lib = Lib(smplx_body_gvhmr["global_orient"])
     is_torch = lib.__name__ == 'torch'
     # Assuming that your data are stored in gvhmr_smplx_params and hamer_mano_params
-    full_body_pose = lib.concatenate((smplx_body_gvhmr["global_orient"], smplx_body_gvhmr["body_pose"].reshape(21, 3)), **{Axis(is_torch): 0})     # gvhmr_smplx_params["global_orient"]: (3, 3)
+    # full_body_pose = lib.concatenate((smplx_body_gvhmr["global_orient"], smplx_body_gvhmr["body_pose"].reshape(21, 3)), **{Axis(is_torch): 0})     # gvhmr_smplx_params["global_orient"]: (3, 3)
     # left_elbow_global_rot = compute_global_rotation(full_body_pose, 18)  # left elbow IDX: 18
     # right_elbow_global_rot = compute_global_rotation(full_body_pose, 19)  # left elbow IDX: 19
-    left_elbow_global_rot = smplx_body_gvhmr
+    left_elbow_global_rot = smplx_body_gvhmr[:, 18]
+    right_elbow_global_rot = smplx_body_gvhmr[:, 19]
 
     left_wrist_global_rot = mano_hand_hamer["global_orient"][0].cpu().numpy()  # hamer_mano_params["global_orient"]: (2, 3, 3)
     left_wrist_global_rot = M @ left_wrist_global_rot @ M  # mirror switch
@@ -102,13 +109,15 @@ def wilor(
     wilor(data('smplx', 'wilor', person=0))
     ```
     """
+    # pose_body = data('body_pose', mapping='smplx', run='gvhmr').value
+    # pose_body =
     data, HAND, armature, rot, Slice = check_before_run(data, 'HANDS', 'wilor', mapping, Range)
     # rotate = data(prop='global_orient').value
     # rotate = rotate.reshape(-1, 1, rotate.shape[-1])
     pose = data('hand_pose').value[Slice]
     # pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3|4)
 
-    _, _, pose, r = mano_to_smplx(kwargs.get('body'), pose)
+    _, _, pose, r = mano_to_smplx(pose_body, pose)
 
     with bpy_action(armature, ';'.join([data.who, data.run])) as action:
         pose_apply(action=action, pose=pose, bones=HAND, rot=rot, **kwargs)

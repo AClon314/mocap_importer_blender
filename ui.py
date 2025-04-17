@@ -2,11 +2,8 @@
 """bind to blender logic."""
 import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
-try:
-    from .lib import DIR_MAPPING, _PKG_, Log, execute, items_mapping, items_motions, get_bones_info, load_data, add_mapping, apply
-except ImportError as e:
-    print(f'ui ⚠️ {e}')
-    from lib import *
+from .logger import _PKG_
+from .lib import DIR_MAPPING, Log, items_mapping, items_motions, get_bones_info, load_data, apply
 VIDEO_EXT = "webm,mkv,flv,flv,vob,vob,ogv,ogg,drc,gifv,webm,gifv,mng,avi,mov,qt,wmv,yuv,rm,rmvb,viv,asf,amv,mp4,m4p,m4v,mpg,mp2,mpeg,mpe,mpv,mpg,mpeg,m2v,m4v,svi,3gp,3g2,mxf,roq,nsv,flv,f4v,f4p,f4a,f4b".split(',')
 BL_ID = 'MOCAP_PT_Panel'
 BL_CATAGORY = 'SMPL-X'
@@ -17,6 +14,17 @@ def Props(context): return context.scene.mocap_importer
 def Layout(self) -> 'bpy.types.UILayout': return self.layout
 def Eval(self, context): return eval(self.debug_eval)
 # def Eval(self, context): ...
+
+
+def execute(func):
+    """bpy.Operator: `self.report()`"""
+
+    def wrap(self, context):
+        setattr(Log, 'report', self.report)
+        ret = func(self, context)
+        delattr(Log, 'report')
+        return ret
+    return wrap
 
 
 class DefaultPanel:
@@ -195,6 +203,27 @@ class ReloadScriptOperator(bpy.types.Operator):
             self.report({'ERROR'}, "没有找到文本编辑器")
             return {'CANCELLED'}
         return {'FINISHED'}
+
+
+class ModalTimerOperator(bpy.types.Operator):
+    """https://blender.stackexchange.com/a/305675/146607"""
+    bl_idname = "wm.modal_timer_operator"
+    bl_label = "Modal Timer Operator"
+    _timer = None
+
+    def modal(self, context, event):
+        [a.tag_redraw() for a in context.screen.areas]
+        if self._timer.time_duration > 3:
+            context.window_manager.progress = 1
+            return {'FINISHED'}
+        context.window_manager.progress = self._timer.time_duration / 3
+        return {'PASS_THROUGH'}
+
+    def execute(self, context):
+        wm = context.window_manager
+        self._timer = wm.event_timer_add(0.1, window=context.window)
+        wm.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
 
 
 class Mocap_PropsGroup(bpy.types.PropertyGroup):
