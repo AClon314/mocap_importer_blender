@@ -195,7 +195,7 @@ def temp_override(
         for screen in bpy.data.screens:
             for _area in screen.areas:
                 if _area.type == area:
-                    override = {"area": _area, "screen": screen}
+                    override = {"screen": screen, "area": _area}
                     Break = True
                     break
             if Break:
@@ -973,6 +973,7 @@ def pose_apply(
     frame=1,
     clean_th=0.002,
     decimate_th=0.005,
+    keep_end=False,
     **kwargs
 ):
     """Apply to keyframes, with translation, pose, and shape to character using Action and F-Curves.
@@ -1012,6 +1013,8 @@ def pose_apply(
     is_clean = clean_th > 0
     is_decimate = decimate_th > 0
     if is_clean or is_decimate:
+        # TODO: ⭐复制优化前动画，二分法调整threshold直到用户满意（方便后期手工曲线编辑）⭐
+        # TODO: 增加armatures参数，未处理多骨架同时导入
         with temp_override(area='GRAPH_EDITOR', mode='global') as context:
             obj = context.active_object
             old_show = context.area.spaces[0].dopesheet.show_only_selected
@@ -1020,6 +1023,16 @@ def pose_apply(
             old_bones = [b for b in obj.pose.bones if not b.bone.select]
             for b in old_bones:
                 b.bone.select = True
+
+            # exclude = [1] if keep_begin else []
+            exclude = [len(rots)] if keep_end else []
+            for fcurve in action.fcurves:
+                # 过滤掉非关键通道（如位置通道可能不需要处理）
+                if not any(b in fcurve.data_path for b in bones):
+                    continue
+                for keyframe in fcurve.keyframe_points:
+                    if keyframe.co[0] in exclude:
+                        keyframe.select_control_point = False
 
             if is_clean:
                 bpy.ops.graph.clean(threshold=clean_th, channels=False)

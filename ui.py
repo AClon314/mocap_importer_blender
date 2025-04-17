@@ -13,6 +13,8 @@ BL_REGION = 'UI'
 BL_CONTEXT = 'objectmode'
 def Props(context): return context.scene.mocap_importer
 def Layout(self) -> 'bpy.types.UILayout': return self.layout
+def Eval(self, context): return eval(self.debug_eval)
+# def Eval(self, context): ...
 
 
 class Mocap_PropsGroup(bpy.types.PropertyGroup):
@@ -28,6 +30,11 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         description='load which motion action',
         items=items_motions,
         default=0,
+    )  # type: ignore
+    keep_end: bpy.props.BoolProperty(
+        name='End Frame',
+        description='Keep last frame at -1 as start frame when clean up keyframes curves',
+        default=True,
     )  # type: ignore
     mapping: bpy.props.EnumProperty(
         name='Armature',
@@ -68,10 +75,16 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         precision=3,
     )  # type: ignore
     debug_kwargs: bpy.props.StringProperty(
-        name='kwargs',
+        name='Arguments',
         description='kwargs for debug',
         default="quat=0",
     )   # type: ignore
+    # debug_eval: bpy.props.StringProperty(
+    #     name='Console Execute',
+    #     description='Dangerous',
+    #     default="print('😄')",
+    #     update=Eval,
+    # )   # type: ignore
 
 
 class DefaultPanel:
@@ -126,13 +139,16 @@ class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
         _row = col.row(align=True)
         _row.prop(props, 'base_frame')
 
-        row = col.row(align=True)
+        row = col.row()
+        is_clean = props.clean_th > 0
+        is_dec = props.decimate_th > 0
         _row = row.row(align=True)
         _row.prop(props, 'clean_th')
-        _row.active = props.clean_th > 0
-        _row = row.row(align=True)
+        _row.prop(props, 'keep_end', text='', icon='NEXT_KEYFRAME')
+        _row.active = is_clean
+        _row = row.row()
         _row.prop(props, 'decimate_th')
-        _row.active = props.decimate_th > 0
+        _row.active = is_dec
 
 
 class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
@@ -142,10 +158,10 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
     def draw(self, context):
         layout = Layout(self)
         props = Props(context)
-        row = layout.row()
-        row.operator('armature.get_bones_info', icon='BONE_DATA')
-        row = layout.row()
-        row.prop(props, 'debug_kwargs')
+        col = layout.column()
+        col.operator('armature.get_bones_info', icon='BONE_DATA')
+        col.prop(props, 'debug_kwargs', text='')
+        # col.prop(props, 'debug_eval', icon='CONSOLE', text='')
 
 
 class ApplyMocap_Operator(bpy.types.Operator):
@@ -158,8 +174,9 @@ class ApplyMocap_Operator(bpy.types.Operator):
     def execute(self, context):
         props = Props(context)
         mapping = None if props.mapping == 'Auto detect' else props.mapping
+        kw = {k: v for k, v in props.items()}
         kwargs = eval(f'dict({props.debug_kwargs})')
-        apply(props.motions, mapping=mapping, base_frame=props.base_frame, clean_th=props.clean_th, decimate_th=props.decimate_th, **kwargs)
+        apply(props.motions, mapping=mapping, **kwargs, **kw)
         return {'FINISHED'}
 
 
