@@ -5,7 +5,7 @@ from ..b import check_before_run, pose_apply, bpy_action
 def gvhmr(
     data: MotionData,
     mapping: TYPE_MAPPING | None = None,
-    Range=[0, None],
+    Slice=slice(0, None),
     base_frame=0,
     **kwargs
 ):
@@ -21,7 +21,8 @@ def gvhmr(
     gvhmr(data('smplx', 'gvhmr', person=0))
     ```
     """
-    data, BODY, armature, rot, Slice = check_before_run(data, 'BODY', 'gvhmr', mapping, Range)
+    data, BODY, armature, Slice = check_before_run(data, 'BODY', 'gvhmr', mapping, Slice)
+
     BODY = BODY[:23]
     transl = data('transl', 'global').value[Slice]
     rotate = data('global_orient', 'global').value[Slice]
@@ -30,4 +31,4 @@ def gvhmr(
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3 or 4)
 
     with bpy_action(armature, ';'.join([data.who, data.run])) as action:
-        pose_apply(action=action, pose=pose, transl=transl, transl_base=transl[base_frame], bones=BODY, rot=rot, **kwargs)
+        pose_apply(armature=armature, action=action, pose=pose, transl=transl, transl_base=transl[base_frame], bones=BODY, ** kwargs)

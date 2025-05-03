@@ -11,7 +11,8 @@ version = "0.2.0"
 type = "add-on"
 
 # Optional link to documentation, support, source files, etc
-# website = "https://extensions.blender.org/add-ons/my-example-package/"
+# website = "https://extensions.blender.org/add-ons/mocap-importer/"
+website = "https://github.com/AClon314/mocap_importer_blender"
 
 # Optional list defined by Blender and server, see:
 # https://docs.blender.org/manual/en/dev/advanced/extensions/tags.html
@@ -57,9 +58,9 @@ copyright = [
 # Keep this a single short sentence without a period (.) at the end.
 # For longer explanations use the documentation or detail page.
 #
-# [permissions]
+[permissions]
 # network = "Need to sync motion-capture data to server"
-# files = "Import/export FBX from/to disk"
+files = "Import/export .npz mocap data from/to disk"
 # clipboard = "Copy and paste bone transforms"
 
 # Optional: build settings.

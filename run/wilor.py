@@ -1,5 +1,5 @@
 from ..lib import *
-from ..b import check_before_run, pose_apply, bpy_action
+from ..b import check_before_run, pose_apply, bpy_action, bones_rotation
 
 
 def compute_global_rotation(pose_axis_anges, joint_idx):
@@ -24,33 +24,9 @@ def compute_global_rotation(pose_axis_anges, joint_idx):
     return global_rotation
 
 
-def get_bone_global_rotation(armature, bone_name, frame):
-    """
-    获取某骨骼在某帧的全局旋转矩阵。
-
-    Args:
-        armature_name (str): 骨架对象名称。
-        bone_name (str): 骨骼名称。
-        frame (int): 帧号。
-
-    Returns:
-        Matrix: 骨骼的全局旋转矩阵。
-    """
-    bpy.context.scene.frame_set(frame)  # type: ignore
-
-    # 获取骨骼的全局矩阵
-    bone = armature.pose.bones[bone_name]
-    global_matrix = armature.matrix_world @ bone.matrix
-
-    # 提取旋转部分
-    global_rotation = global_matrix.to_3x3()
-    return global_rotation
-
-
 def mano_to_smplx(smplx_body_gvhmr, mano_hand_hamer):
     """https://github.com/VincentHu19/Mano2Smpl-X/blob/main/mano2smplx.py"""
-    # M = np.diag([-1, 1, 1])  # Preparing for the left hand switch
-    M = np.diag([1, 1, 1])
+    M = np.diag([-1, 1, 1])  # Preparing for the left hand switch
 
     lib = Lib(smplx_body_gvhmr["global_orient"])
     is_torch = lib.__name__ == 'torch'
@@ -93,7 +69,7 @@ def mano_to_smplx(smplx_body_gvhmr, mano_hand_hamer):
 def wilor(
     data: MotionData,
     mapping: TYPE_MAPPING | None = None,
-    Range=[0, None],
+    Slice=slice(0, None),
     base_frame=0,
     **kwargs
 ):
@@ -110,8 +86,12 @@ def wilor(
     ```
     """
     # pose_body = data('body_pose', mapping='smplx', run='gvhmr').value
-    # pose_body =
-    data, HAND, armature, rot, Slice = check_before_run(data, 'HANDS', 'wilor', mapping, Range)
+    data, HAND, armature, Slice = check_before_run(data, 'HANDS', 'wilor', mapping, Slice)
+
+    BODY = getattr(Map()['smplx'], 'BODY', 'BODY')   # type:ignore
+    pose_body = bones_rotation(armature=armature, bone_resort=BODY, Slice=slice(1, 2))
+    Log.info(f'pose_body: {pose_body}')
+
     # rotate = data(prop='global_orient').value
     # rotate = rotate.reshape(-1, 1, rotate.shape[-1])
     pose = data('hand_pose').value[Slice]
@@ -120,4 +100,4 @@ def wilor(
     _, _, pose, r = mano_to_smplx(pose_body, pose)
 
     with bpy_action(armature, ';'.join([data.who, data.run])) as action:
-        pose_apply(action=action, pose=pose, bones=HAND, rot=rot, **kwargs)
+        pose_apply(armature=armature, action=action, pose=pose, bones=HAND, **kwargs)

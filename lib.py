@@ -272,7 +272,7 @@ def keys_BFS(
 
 def get_bones_info(armature=None):
     """For debug: print bones info"""
-    from .b import bones_tree, get_armatures
+    from .b import bones_tree, get_armatures, bone_global_rotation_matrix
     armatures = get_armatures()
     S = ""
     for armature in armatures:
@@ -280,6 +280,9 @@ def get_bones_info(armature=None):
         List = keys_BFS(tree)
         S += f"""TYPE_BODY = Literal{List}
 BONES_TREE = {tree}"""
+        for b in List:
+            global_rot = bone_global_rotation_matrix(armature=armature, bone=b)
+            S += f"\n{b}: {global_rot}"
     return S
 
 
@@ -303,9 +306,8 @@ def get_mapping(mapping: TYPE_MAPPING | None = None, armature=None):
     """
     from .b import get_armatures, guess_obj_mapping
     if mapping is None:
-        # guess mapping
-        active = get_armatures()[0] if not armature else armature
-        mapping = guess_obj_mapping(active)
+        armature = get_armatures(armatures=[armature])[0]
+        mapping = guess_obj_mapping(armature)
     if mapping is None:
         raise ValueError(f'Unknown mapping: {mapping}, try to select/add new mapping to')
     return mapping

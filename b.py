@@ -20,60 +20,93 @@ TYPE_I18N = Literal[  # blender 4.3.2
 ]
 
 
-def export_bone_rotations_to_numpy(armature, begin_frame, end_frame):
+def bone_global_rotation_matrix(
+    armature: 'bpy.types.Object',
+    bone: str,
+    frame: int | None = None
+) -> Matrix:
+    """
+    获取某骨骼在某帧的全局旋转矩阵。
+
+    Args:
+        armature_name (str): 骨架对象名称。
+        bone_name (str): 骨骼名称。
+        frame (int): 帧号。
+
+    Returns:
+        Matrix: 骨骼的全局旋转矩阵。
+    """
+    if frame:
+        bpy.context.scene.frame_set(frame)  # type: ignore
+
+    # 获取骨骼的全局矩阵
+    _bone = armature.pose.bones[bone]
+    global_matrix = armature.matrix_world @ _bone.matrix
+
+    # 提取旋转部分
+    matrix = global_matrix.to_3x3()
+    return matrix
+
+
+def bones_rotation(
+    armature: 'bpy.types.Object',
+    bone_resort: Sequence[str] | None = None,
+    Slice: slice | None = None,
+):
     """
     导出指定帧范围内骨骼旋转关键帧为四元数数组
 
-    参数:
-        armature_name (str): 骨架对象名称
-        action_name (str): 动作名称
-        begin_frame (int): 起始帧
-        end_frame (int): 结束帧
+    Args:
+        Slice (slice): 帧范围，格式为slice(start, stop, step)，例如slice(1, 100, 1)
 
-    返回:
+    Returns:
         numpy.ndarray: 形状为(total_frames, total_bones, 4)的四元数数组
     """
-    # 获取骨架和动作对象
-    # action = bpy.data.actions.get(action_name)
     action = armature.animation_data.action
-    if not armature or not action:
-        raise ValueError("骨架或动作未找到")
+    if not action:
+        raise ValueError("Action Not found")
 
     # 收集骨骼信息
-    bones = armature.pose.bones
-    bone_names = [bone.name for bone in bones]
+    bones = {b.name: b for b in armature.pose.bones}
+    Log.debug(f'Bones before: {bones.keys()}')
+    if bone_resort:
+        Keys = bones.keys()
+        bones = {b_name: bones[b_name] for b_name in bone_resort if b_name in Keys}
+    Log.debug(f'Bones: {bones.keys()}')
     total_bones = len(bones)
 
     # 预处理：为每个骨骼获取四元数FCurves和初始旋转值
     bone_fcurves = {}
-    bone_initial_quats = {}
-    for bone in bones:
-        data_path = f'pose.bones["{bone.name}"].rotation_quaternion'
+    bone_init_quats = {}
+    for name, bone in bones.items():
+        data_path = f'pose.bones["{name}"].rotation_quaternion'
         fcurves = [action.fcurves.find(data_path, index=i) for i in range(4)]
-        bone_fcurves[bone.name] = fcurves
-        bone_initial_quats[bone.name] = bone.rotation_quaternion
+        bone_fcurves[name] = fcurves
+        bone_init_quats[name] = bone.rotation_quaternion
 
     # 准备帧范围
-    frames = range(begin_frame, end_frame + 1)
-    total_frames = len(frames)
+    if Slice:
+        frames = range(*Slice.indices(Slice.stop))
+    else:
+        frames = range(int(action.frame_range[0]), int(action.frame_range[1]) + 1)
 
     # 初始化数组
-    quat_array = np.zeros((total_frames, total_bones, 4))
+    quat_array = np.zeros((len(frames), total_bones, 4))
 
     # 填充数据
-    for frame_idx, frame in enumerate(frames):
-        for bone_idx, bone_name in enumerate(bone_names):
+    for fr_i, fr in enumerate(frames):
+        for bone_i, bone_name in enumerate(bones.keys()):
             # 获取四元数分量
             quat = []
             for i in range(4):
                 fcurve = bone_fcurves[bone_name][i]
                 if fcurve:
-                    value = fcurve.evaluate(frame)
+                    value = fcurve.evaluate(fr)
                 else:
                     # 使用初始旋转值
-                    value = bone_initial_quats[bone_name][i]
+                    value = bone_init_quats[bone_name][i]
                 quat.append(value)
-            quat_array[frame_idx, bone_idx] = quat
+            quat_array[fr_i, bone_i] = quat
 
     return quat_array
 
@@ -292,7 +325,7 @@ def progress_mouse(*Range: float, is_percent=True):
     wm.progress_end()
 
 
-def get_armatures(armatures=None):
+def get_armatures(armatures: 'list[bpy.types.Object] | None' = None):
     """if None, always get active(selected) armature"""
     if not armatures:
         armatures = bpy.context.selected_objects
@@ -376,9 +409,7 @@ def add_mapping(armatures: Sequence['bpy.types.Object'] | None = None, check=Tru
     return files
 
 
-def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> TYPE_MAPPING | None:
-    if obj.type != 'ARMATURE':
-        return None
+def guess_obj_mapping(obj: 'bpy.types.Object') -> TYPE_MAPPING:
     bones = bones_tree(obj)
     keys = keys_BFS(bones)
     mapping = None
@@ -388,8 +419,6 @@ def guess_obj_mapping(obj: 'bpy.types.Object', select=True) -> TYPE_MAPPING | No
         if similar > max_similar:
             max_similar = similar
             mapping = map
-    if mapping and select:
-        bpy.context.view_layer.objects.active = obj
     Log.info(f'Guess mapping to: {mapping} with {max_similar:.2f}')
     return mapping  # type: ignore
 
@@ -399,7 +428,7 @@ def check_before_run(
     key: str,
     run: TYPE_RUN,
     mapping: TYPE_MAPPING | None = None,
-    Range=[0, None],
+    Slice=slice(0, None),
 ):
     """
     guess mapping[smpl,smplx]/Range_end/bone_rotation_mode[eular,quat]
@@ -412,26 +441,27 @@ def check_before_run(
     ```
     """
     data = data(mapping=data.mapping, run=run)  # type: ignore
-    is_range = len(Range) > 1
+    armature = get_armatures()[0]
 
-    armature = bpy.context.active_object
-    if armature is None or armature.type != 'ARMATURE':
-        raise ValueError('No armature found')
+    mapping = None if mapping == 'auto' else mapping
+    mapping = get_mapping(mapping=mapping, armature=armature)
+    BONES = getattr(Map()[mapping], key, 'BODY')   # type:ignore
+    Log.debug("mapping from {}".format(f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping))
+
+    if Slice.stop is None:
+        Len = len(data('global_orient').value)   # TODO: 使用专有信息 npz['meatadata'](dtype=object) as dict
+        t = list(Slice.indices(Len))
+        t[1] = Len
+        Slice = slice(*t)
+        Log.info(f'Frame range (Slice) fallback to {Slice}')
+    return data, BONES, armature, Slice
+
+
+def bone_rotation_mode(armature):
     bones_rots: list[TYPE_ROT] = [b.rotation_mode for b in armature.pose.bones]
     rot = get_major(bones_rots)
     rot = 'QUATERNION' if not rot else rot
-
-    mapping = None if mapping == 'auto' else mapping
-    mapping = get_mapping(mapping)
-    BONES = getattr(Map()[mapping], key, 'BODY')   # type:ignore
-
-    if is_range and Range[1] is None:
-        Range[1] = len(data('global_orient').value)    # TODO: use data.frames
-        Log.info(f'range_frame[1] fallback to {Range[1]}')
-    str_map = f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping
-    Log.debug(f'mapping from {str_map}')
-
-    return data, BONES, armature, rot, slice(*Range)
+    return rot
 
 
 def pose_reset(
@@ -453,12 +483,12 @@ def pose_reset(
 
 
 def pose_apply(
+    armature: 'bpy.types.Object',
     action: 'bpy.types.Action',
     bones: Sequence[str],
     pose: 'np.ndarray',
     transl: 'np.ndarray | None' = None,
     transl_base: 'np.ndarray | None' = None,
-    rot: TYPE_ROT = 'QUATERNION',
     frame=1,
     clean_th=0.002,
     decimate_th=0.005,
@@ -475,6 +505,7 @@ def pose_apply(
         clean_th: -1 to disable,suggest 0.001~0.005; **keep default bezier curve handle ⚫**, clean nearby keyframes if `current-previous > threshold`; aims to remove time noise/tiny shake
         decimate_th: -1 to disable, suggest 0.001~0.1; **will modify curve handle ⚫→🔶**, decide to decimate current frame if `error=new-old < threshold`; aims to be editable
     """
+    rot = bone_rotation_mode(armature)
     method = str(kwargs.get('quat', 0))[0]
     if rot == 'QUATERNION':
         if method == 'a':  # axis
