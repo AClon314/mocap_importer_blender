@@ -1,69 +1,68 @@
 from ..lib import *
-from ..b import check_before_run, pose_apply, bpy_action, bones_rotation
+from ..b import check_before_run, get_bones_global_rotation, pose_apply, bpy_action
 
 
-def compute_global_rotation(pose_axis_anges, joint_idx):
+def mano_to_smplx(
+    body_pose: 'np.ndarray',
+    hand_pose: 'np.ndarray',
+    global_orient: 'np.ndarray',
+    is_left=False,
+    **kwargs,
+):
     """
-    calculating joints' global rotation
+    hand to body pose:
+    https://github.com/VincentHu19/Mano2Smpl-X/blob/main/mano2smplx.py
+
     Args:
-        pose_axis_anges (np.array): SMPLX's local pose (22,3)
-    Returns:
-        np.array: (3, 3)
+        - body_pose (np.array): SMPLX's local pose (22, 3 or 4)
+        - hand_pose (np.array): MANO's local pose (15, 3 or 4)
+        - global_orient (np.array): **hand**'s global orientation (?, 3 or 4)
+        - is_left (bool): whether the hand is left or right
+
+    ---
+    Returns
+    ---
+        - wrist_pose (np.array): SMPLX's local pose (3 or 4), re-calculate based on `body_write` & hans's `global_orient`
+        - hand_pose (np.array): SMPLX's local pose (15, 3 or 4), mirrored if is_left
     """
-    global_rotation = np.eye(3)
-    parents = [
-        -1, 0, 0, 0, 1,
-        2, 3, 4, 5, 6, 7,
-        8, 9, 9, 9, 12,
-        13, 14, 16, 17, 18,
-        19]
-    while joint_idx != -1:
-        joint_rotation = Rodrigues(pose_axis_anges[joint_idx])
-        global_rotation = joint_rotation @ global_rotation
-        joint_idx = parents[joint_idx]
-    return global_rotation
+    Log.debug(f'{body_pose.shape=}')
+    Log.debug(f'{hand_pose.shape=}')
+    Log.debug(f'{global_orient.shape=}')
 
-
-def mano_to_smplx(smplx_body_gvhmr, mano_hand_hamer):
-    """https://github.com/VincentHu19/Mano2Smpl-X/blob/main/mano2smplx.py"""
     M = np.diag([-1, 1, 1])  # Preparing for the left hand switch
-
-    lib = Lib(smplx_body_gvhmr["global_orient"])
+    lib = Lib(body_pose)
     is_torch = lib.__name__ == 'torch'
-    # Assuming that your data are stored in gvhmr_smplx_params and hamer_mano_params
-    # full_body_pose = lib.concatenate((smplx_body_gvhmr["global_orient"], smplx_body_gvhmr["body_pose"].reshape(21, 3)), **{Axis(is_torch): 0})     # gvhmr_smplx_params["global_orient"]: (3, 3)
-    # left_elbow_global_rot = compute_global_rotation(full_body_pose, 18)  # left elbow IDX: 18
-    # right_elbow_global_rot = compute_global_rotation(full_body_pose, 19)  # left elbow IDX: 19
-    left_elbow_global_rot = smplx_body_gvhmr[:, 18]
-    right_elbow_global_rot = smplx_body_gvhmr[:, 19]
+    hand_pose = rotMat(hand_pose)
+    global_orient = rotMat(global_orient)
+    if is_left:
+        idx_elbow = 19  # +1 offset due to root bone
+        global_orient = M @ global_orient @ M  # mirror switch
+        hand_pose = M @ hand_pose @ M
+    else:
+        idx_elbow = 20
+    body_elbow = body_pose[:, idx_elbow]
+    body_elbow = rotMat(body_elbow)
 
-    left_wrist_global_rot = mano_hand_hamer["global_orient"][0].cpu().numpy()  # hamer_mano_params["global_orient"]: (2, 3, 3)
-    left_wrist_global_rot = M @ left_wrist_global_rot @ M  # mirror switch
-    left_wrist_pose = np.linalg.inv(left_elbow_global_rot) @ left_wrist_global_rot
+    if body_elbow.shape[0] < global_orient.shape[0]:
+        # body < hand, padding body from the last frame
+        pad_size = global_orient.shape[0] - body_elbow.shape[0]
+        body_elbow = np.pad(body_elbow, ((0, pad_size), (0, 0), (0, 0)), mode='edge')
+    else:
+        # body > hand, clip body
+        body_elbow = body_elbow[:global_orient.shape[0]]
 
-    right_wrist_global_rot = mano_hand_hamer["global_orient"][1].cpu().numpy()
-    right_wrist_pose = np.linalg.inv(right_elbow_global_rot) @ right_wrist_global_rot
+    wrist_pose = np.linalg.inv(body_elbow) @ global_orient
+    print(f'{wrist_pose=}\n{body_elbow.shape=}\n{body_elbow[1:]}\n{np.linalg.inv(body_elbow[1:])=}\n{global_orient.shape=}')
 
-    left_wrist_pose_vec = euler(RotMat_to_quat(left_wrist_pose))
-    right_wrist_pose_vec = euler(RotMat_to_quat(right_wrist_pose))
+    wrist_pose = np.ones_like(wrist_pose)  # TODO DEBUG
 
-    left_hand_pose = np.ones(45)
-    right_hand_pose = np.ones(45)
-    for i in range(15):
-        left_finger_pose = M @ mano_hand_hamer["hand_pose"][0][i].cpu().numpy() @ M  # hamer_mano_params["hand_pose"]: (2, 15, 3, 3)
-        left_finger_pose_vec = euler(RotMat_to_quat(left_finger_pose))
-        left_hand_pose[i * 3: i * 3 + 3] = left_finger_pose_vec
+    wrist_pose = rotMat_to_quat(wrist_pose)
+    hand_pose = rotMat_to_quat(hand_pose)
 
-        right_finger_pose = mano_hand_hamer["hand_pose"][1][i].cpu().numpy()
-        right_finger_pose_vec = euler(RotMat_to_quat(right_finger_pose))
-        right_hand_pose[i * 3: i * 3 + 3] = right_finger_pose_vec
+    Log.debug(f'wrist_pose: {wrist_pose.shape}')
+    Log.debug(f'hand_pose: {hand_pose.shape}')
 
-    # smplx_body_gvhmr["body_pose"][57: 60] = left_wrist_pose_vec
-    # smplx_body_gvhmr["body_pose"][60: 63] = right_wrist_pose_vec
-    # smplx_body_gvhmr["left_hand_pose"] = left_hand_pose
-    # smplx_body_gvhmr["right_hand_pose"] = right_hand_pose
-
-    return left_wrist_pose_vec, right_wrist_pose_vec, left_hand_pose, right_hand_pose
+    return wrist_pose, hand_pose
 
 
 def wilor(
@@ -88,16 +87,22 @@ def wilor(
     # pose_body = data('body_pose', mapping='smplx', run='gvhmr').value
     data, HAND, armature, Slice = check_before_run(data, 'HANDS', 'wilor', mapping, Slice)
 
-    BODY = getattr(Map()['smplx'], 'BODY', 'BODY')   # type:ignore
-    pose_body = bones_rotation(armature=armature, bone_resort=BODY, Slice=slice(1, 2))
-    Log.info(f'pose_body: {pose_body}')
+    BODY: list[str] = getattr(Map()['smplx'], 'BODY')   # type:ignore
+    body_pose = get_bones_global_rotation(armature=armature, bone_resort=BODY, Slice=Slice)
 
-    # rotate = data(prop='global_orient').value
-    # rotate = rotate.reshape(-1, 1, rotate.shape[-1])
-    pose = data('hand_pose').value[Slice]
-    # pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3|4)
+    is_left = True if 'L' in data.who else False
+    prefix = 'left_' if is_left else 'right_'
+    name_wrist: str = BODY[21] if is_left else BODY[22]  # +1 offset
+    HAND = [name_wrist] + [prefix + bone for bone in HAND]
 
-    _, _, pose, r = mano_to_smplx(pose_body, pose)
+    hand_pose = data('hand_pose').value[Slice]
+    rotate = data('global_orient').value[Slice]
+    rotate = quat(rotate)
+
+    wrist_rotate, hand_pose = mano_to_smplx(body_pose, hand_pose, rotate, is_left=is_left, **kwargs)
+    wrist_rotate = wrist_rotate.reshape(-1, 1, wrist_rotate.shape[-1])
+    hand_pose = np.concatenate([wrist_rotate, hand_pose], axis=1)  # (frames,16,3|4)
+    Log.debug(f'hand_pose final: {hand_pose.shape}')
 
     with bpy_action(armature, ';'.join([data.who, data.run])) as action:
-        pose_apply(armature=armature, action=action, pose=pose, bones=HAND, **kwargs)
+        pose_apply(armature=armature, action=action, pose=hand_pose, bones=HAND, **kwargs)

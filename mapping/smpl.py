@@ -32,19 +32,9 @@ TYPE_BODY = Literal[
     'm_avg_L_Hand',
     'm_avg_R_Hand',
 ]
-# TYPE_HEAD = Literal[
-#     ...
-# ]
-# TYPE_HANDS = Literal[
-#     ...
-# ]
-# TYPE_BONES = Literal[TYPE_BODY, TYPE_HEAD, TYPE_HANDS]
 TYPE_BONES = TYPE_BODY
 
-BODY = get_args(TYPE_BODY)
-# HEAD = get_args(TYPE_HEAD)
-# HANDS = get_args(TYPE_HANDS)
-# BONES = BODY + HEAD + HANDS
+BODY = list(get_args(TYPE_BODY))
 BONES = BODY
 
 MAP: Dict[T_BONES, TYPE_BONES] = {k: v for k, v in zip(X_BODY, BODY)}

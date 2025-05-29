@@ -9,9 +9,9 @@ TYPE_HANDS = Literal[
 ]
 TYPE_BONES = Literal[TYPE_BODY, TYPE_HEAD, TYPE_HANDS]
 
-BODY = get_args(TYPE_BODY)
-HEAD = get_args(TYPE_HEAD)
-HANDS = get_args(TYPE_HANDS)
+BODY = list(get_args(TYPE_BODY))
+HEAD = list(get_args(TYPE_HEAD))
+HANDS = list(get_args(TYPE_HANDS))
 BONES = BODY + HEAD + HANDS
 
 from .smplx import TYPE_BONES as T_BONES

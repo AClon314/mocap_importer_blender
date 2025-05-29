@@ -3,7 +3,8 @@
 import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 from .logger import _PKG_
-from .lib import DIR_MAPPING, Log, items_mapping, items_motions, get_bones_info, load_data, apply
+from .b import add_mapping, get_bones_info
+from .lib import DIR_MAPPING, Log, items_mapping, items_motions, load_data, apply
 VIDEO_EXT = "webm,mkv,flv,flv,vob,vob,ogv,ogg,drc,gifv,webm,gifv,mng,avi,mov,qt,wmv,yuv,rm,rmvb,viv,asf,amv,mp4,m4p,m4v,mpg,mp2,mpeg,mpe,mpv,mpg,mpeg,m2v,m4v,svi,3gp,3g2,mxf,roq,nsv,flv,f4v,f4p,f4a,f4b".split(',')
 BL_ID = 'MOCAP_PT_Panel'
 BL_CATAGORY = 'SMPL-X'

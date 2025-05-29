@@ -20,7 +20,7 @@ TYPE_I18N = Literal[  # blender 4.3.2
 ]
 
 
-def bone_global_rotation_matrix(
+def get_bone_global_rotation(
     armature: 'bpy.types.Object',
     bone: str,
     frame: int | None = None
@@ -48,13 +48,64 @@ def bone_global_rotation_matrix(
     return matrix
 
 
-def bones_rotation(
+def get_bones_global_rotation(
+    armature: 'bpy.types.Object',
+    bone_resort: Sequence[str] | None = None,
+    Slice: slice | None = None,
+) -> np.ndarray:
+    """
+    导出指定帧范围内骨骼全局绝对旋转关键帧为四元数数组
+
+    Args:
+        armature (bpy.types.Object): 骨架对象。
+        bone_resort (Sequence[str] | None): 骨骼名称排序列表。
+        Slice (slice | None): 帧范围，格式为 slice(start, stop, step)。
+
+    Returns:
+        numpy.ndarray: 形状为 (total_frames, total_bones, 4) 的四元数数组。
+    """
+    # 确定帧范围
+    if Slice:
+        frames = range(*Slice.indices(Slice.stop))
+    else:
+        action = armature.animation_data.action
+        if not action:
+            raise ValueError("Action Not found")
+        start, end = map(int, action.frame_range)
+        frames = range(start, end + 1)
+
+    # 收集骨骼信息
+    bones = {b.name: b for b in armature.pose.bones}
+    if bone_resort:
+        bones = {name: bones[name] for name in bone_resort if name in bones}
+    bone_names = list(bones.keys())
+    total_bones = len(bone_names)
+
+    # 初始化数组
+    rot_mode = get_bone_rotation_mode(armature)
+    rot_arr = np.zeros((len(frames), total_bones, 4 if rot_mode == 'QUATERNION' else 3))
+
+    # 导出数据
+    with progress_mouse(len(frames)) as update:
+        for fr_i, frame in enumerate(frames):
+            bpy.context.scene.frame_set(frame)
+            for bone_i, bone_name in enumerate(bone_names):
+                rot = get_bone_global_rotation(armature, bone_name)
+                rot = rot.to_quaternion() if rot_mode == 'QUATERNION' else rot.to_euler(rot_mode)
+                rot = np.array(rot)
+                rot_arr[fr_i, bone_i] = rot
+            update()
+
+    return rot_arr
+
+
+def get_bones_relative_rotation(
     armature: 'bpy.types.Object',
     bone_resort: Sequence[str] | None = None,
     Slice: slice | None = None,
 ):
     """
-    导出指定帧范围内骨骼旋转关键帧为四元数数组
+    导出指定帧范围内骨骼**相对**旋转关键帧为四元数数组
 
     Args:
         Slice (slice): 帧范围，格式为slice(start, stop, step)，例如slice(1, 100, 1)
@@ -72,7 +123,7 @@ def bones_rotation(
     if bone_resort:
         Keys = bones.keys()
         bones = {b_name: bones[b_name] for b_name in bone_resort if b_name in Keys}
-    Log.debug(f'Bones: {bones.keys()}')
+        Log.debug(f'Bones after: {bones.keys()}')
     total_bones = len(bones)
 
     # 预处理：为每个骨骼获取四元数FCurves和初始旋转值
@@ -432,12 +483,10 @@ def check_before_run(
 ):
     """
     guess mapping[smpl,smplx]/Range_end/bone_rotation_mode[eular,quat]
-    TODO: OMG, this shit💩 is too bad, need to refactor
 
     Usage:
     ```python
-    global BODY
-    data, armature, bone_rot, BODY, _Range = check_before_run('gvhmr','BODY', data, Range, mapping)
+    data, BODY, armature, Slice = check_before_run(data, 'BODY', 'gvhmr', mapping, Slice)
     ```
     """
     data = data(mapping=data.mapping, run=run)  # type: ignore
@@ -445,7 +494,7 @@ def check_before_run(
 
     mapping = None if mapping == 'auto' else mapping
     mapping = get_mapping(mapping=mapping, armature=armature)
-    BONES = getattr(Map()[mapping], key, 'BODY')   # type:ignore
+    BONES: list[str] = getattr(Map()[mapping], key, getattr(Map()[mapping], 'BONES'))   # type:ignore
     Log.debug("mapping from {}".format(f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping))
 
     if Slice.stop is None:
@@ -457,11 +506,29 @@ def check_before_run(
     return data, BONES, armature, Slice
 
 
-def bone_rotation_mode(armature):
+def get_bone_rotation_mode(armature):
     bones_rots: list[TYPE_ROT] = [b.rotation_mode for b in armature.pose.bones]
     rot = get_major(bones_rots)
     rot = 'QUATERNION' if not rot else rot
     return rot
+
+
+def get_bones_info(armature=None):
+    """For debug: print bones info"""
+    armatures = get_armatures()
+    S = ""
+    for armature in armatures:
+        tree = bones_tree(armature=armature)
+        List = keys_BFS(tree)
+        S += f"""TYPE_BODY = Literal{List}
+BONES_TREE = {tree}"""
+        # for b in List:
+        #     global_rot = get_bone_global_rotation(armature=armature, bone=b)
+        #     S += f"\n{b}:\n{global_rot.to_quaternion()}"
+        cur = bpy.context.scene.frame_current   # type: ignore
+        S += '\nget_bones_global_rotation:\n' + str(get_bones_global_rotation(armature=armature, bone_resort=List, Slice=slice(cur, cur + 1)))
+        S += '\nget_bones_relative_rotation:\n' + str(get_bones_relative_rotation(armature=armature, bone_resort=List, Slice=slice(cur, cur + 1)))
+    return S
 
 
 def pose_reset(
@@ -499,13 +566,14 @@ def pose_apply(
 
     Args:
         bones: `index num` mapping to `bone names`
+        pose: `global_orient` + `pose` rotations, shape==`(frames, len_bones+1 , 3 or 4)`
         transl_base: if **NOT None**, transl will be **relative** to transl_base
         rot: blender rotation mode
         frame: begin frame
         clean_th: -1 to disable,suggest 0.001~0.005; **keep default bezier curve handle ⚫**, clean nearby keyframes if `current-previous > threshold`; aims to remove time noise/tiny shake
         decimate_th: -1 to disable, suggest 0.001~0.1; **will modify curve handle ⚫→🔶**, decide to decimate current frame if `error=new-old < threshold`; aims to be editable
     """
-    rot = bone_rotation_mode(armature)
+    rot = get_bone_rotation_mode(armature)
     method = str(kwargs.get('quat', 0))[0]
     if rot == 'QUATERNION':
         if method == 'a':  # axis

@@ -270,22 +270,6 @@ def keys_BFS(
     return ret
 
 
-def get_bones_info(armature=None):
-    """For debug: print bones info"""
-    from .b import bones_tree, get_armatures, bone_global_rotation_matrix
-    armatures = get_armatures()
-    S = ""
-    for armature in armatures:
-        tree = bones_tree(armature=armature)
-        List = keys_BFS(tree)
-        S += f"""TYPE_BODY = Literal{List}
-BONES_TREE = {tree}"""
-        for b in List:
-            global_rot = bone_global_rotation_matrix(armature=armature, bone=b)
-            S += f"\n{b}: {global_rot}"
-    return S
-
-
 def get_similar(list1, list2):
     """
     calc jaccard similarity of two lists
@@ -516,7 +500,7 @@ def Rodrigues(rot_vec3: TN) -> TN:
     return ret
 
 
-def RotMat_to_quat(R: TN) -> TN:
+def rotMat_to_quat(R: TN) -> TN:
     """将3x3旋转矩阵转换为单位四元数 [w, x, y, z]，支持批量和PyTorch/NumPy"""
     if R.shape[-1] == 4:
         return R
@@ -589,7 +573,66 @@ def RotMat_to_quat(R: TN) -> TN:
     return ret
 
 
-def quat_rotAxis(arr: TN) -> TN: return RotMat_to_quat(Rodrigues(arr))
+def quat_rotAxis(arr: TN) -> TN: return rotMat_to_quat(Rodrigues(arr))
+
+
+def quat_to_rotMat(quats):
+    original_shape = quats.shape
+    N = np.prod(original_shape[:-1])  # 所有维度的乘积，除最后一个维度
+    arr = quats.reshape(N, 4)  # 转换为 (N, 4)
+
+    # 提取四元数分量
+    w, x, y, z = arr.T  # 每个分量形状为 (N,)
+
+    # 构建旋转矩阵
+    R = np.array([
+        [1 - 2 * y**2 - 2 * z**2, 2 * x * y - 2 * w * z, 2 * x * z + 2 * w * y],
+        [2 * x * y + 2 * w * z, 1 - 2 * x**2 - 2 * z**2, 2 * y * z - 2 * w * x],
+        [2 * x * z - 2 * w * y, 2 * y * z + 2 * w * x, 1 - 2 * x**2 - 2 * y**2]
+    ])  # R.shape == (3, 3, N)
+
+    R = R.transpose(2, 0, 1)  # (N, 3, 3)
+    return R.reshape(*original_shape[:-1], 3, 3)  # (..., 3, 3)
+
+
+def euler_to_rotMat(eulers):
+    original_shape = eulers.shape
+    N = np.prod(original_shape[:-1])  # 所有维度的乘积，除最后一个维度
+    arr = eulers.reshape(N, 3)  # 转换为 (N, 3)
+
+    roll, pitch, yaw = arr.T  # 每个角度形状为 (N,)
+
+    cos_r = np.cos(roll)
+    sin_r = np.sin(roll)
+    cos_p = np.cos(pitch)
+    sin_p = np.sin(pitch)
+    cos_y = np.cos(yaw)
+    sin_y = np.sin(yaw)
+
+    R = np.array([
+        [cos_y * cos_p,
+         cos_y * sin_p * sin_r - sin_y * cos_r,
+         cos_y * sin_p * cos_r + sin_y * sin_r],
+        [sin_y * cos_p,
+         sin_y * sin_p * sin_r + cos_y * cos_r,
+         sin_y * sin_p * cos_r - cos_y * sin_r],
+        [-sin_p,
+         cos_p * sin_r,
+         cos_p * cos_r]
+    ])  # R.shape == (3, 3, N)
+
+    R = R.transpose(2, 0, 1)  # (N, 3, 3)
+    return R.reshape(*original_shape[:-1], 3, 3)  # (..., 3, 3)
+
+
+def rotMat(arr: TN):
+    """quat/euler to rotation matrix"""
+    if arr.shape[-1] == 4:
+        return quat_to_rotMat(arr)
+    elif arr.shape[-1] == 3:
+        return euler_to_rotMat(arr)
+    else:
+        raise ValueError(f"Last dimension must be 3 or 4, but got {arr.shape[-1]}")
 
 
 def register():
