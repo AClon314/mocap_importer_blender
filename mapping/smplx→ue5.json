@@ -1,0 +1,74 @@
+{
+    "rokoko_custom_names": true,
+    "version": 1,
+    "bones": {
+        "custom_bone_root": [
+            "root",
+            "root"
+        ],
+        "custom_bone_left_foot": [
+            "left_foot",
+            "ball_l"
+        ],
+        "custom_bone_right_foot": [
+            "right_foot",
+            "ball_r"
+        ],
+        "neck": [
+            "neck_02"
+        ],
+        "custom_bone_left_shoulder": [
+            "left_shoulder",
+            "upperarm_l"
+        ],
+        "custom_bone_right_shoulder": [
+            "right_shoulder",
+            "upperarm_r"
+        ],
+        "leftIndexMedial": [
+            "index_01_l"
+        ],
+        "leftIndexDistal": [
+            "index_02_l"
+        ],
+        "custom_bone_left_index3": [
+            "left_index3",
+            "index_03_l"
+        ],
+        "custom_bone_left_middle3": [
+            "left_middle3",
+            "middle_03_l"
+        ],
+        "leftLittleMedial": [
+            "pinky_01_l"
+        ],
+        "leftLittleDistal": [
+            "pinky_02_l"
+        ],
+        "custom_bone_left_pinky3": [
+            "left_pinky3",
+            "pinky_03_l"
+        ],
+        "leftRingMedial": [
+            "ring_01_l"
+        ],
+        "leftRingDistal": [
+            "ring_02_l"
+        ],
+        "custom_bone_left_ring3": [
+            "left_ring3",
+            "ring_03_l"
+        ],
+        "leftThumbMedial": [
+            "thumb_01_l"
+        ],
+        "leftThumbDistal": [
+            "thumb_02_l"
+        ],
+        "custom_bone_left_thumb3": [
+            "left_thumb3",
+            "thumb_03_l"
+        ]
+    },
+    "shapes": {}
+}

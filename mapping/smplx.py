@@ -32,7 +32,8 @@ TYPE_BODY = Literal[
 ]   # len = 25
 TYPE_HEAD = Literal['jaw', 'left_eye_smplhf', 'right_eye_smplhf']
 TYPE_HANDS = Literal[
-    'thumb', 'index', 'middle', 'ring', 'pinky'
+    # 'thumb', 'index', 'middle', 'ring', 'pinky'
+    'index', 'middle', 'pinky', 'ring', 'thumb'  # https://github.com/otaheri/MANO/blob/master/mano/joints_info.py#L29C2-L43C15
 ]
 TYPE_BONES = Literal[TYPE_BODY, TYPE_HEAD, TYPE_HANDS]
 

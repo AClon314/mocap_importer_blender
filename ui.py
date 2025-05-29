@@ -254,7 +254,7 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
     )  # type: ignore
     base_frame: bpy.props.IntProperty(
         name='Frame',
-        description='could set -1(last) or 0(first) frame as origin location for offset calculation',
+        description='could set -1(last) or 0(first) frame as origin location/rotation for offset calculation',
         # subtype='FACTOR',
         default=0,
         soft_min=-1,
@@ -287,7 +287,7 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
     debug_kwargs: bpy.props.StringProperty(
         name='Arguments',
         description='kwargs for debug',
-        default="quat=0",
+        default="rot=0",
     )   # type: ignore
     # debug_eval: bpy.props.StringProperty(
     #     name='Console Execute',

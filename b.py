@@ -342,7 +342,7 @@ def progress_mouse(*Range: float, is_percent=True):
     _step = R[2] if len(R) == 3 else 1
     R = np.arange(*R, dtype=np.float32)
     wm.progress_begin(R[0], R[-1])
-    Log.debug(f'progress🖱 {Range} → {R}', stack_info=False)
+    # Log.debug(f'progress🖱 {Range} → {R}', stack_info=False)
     i = 0
     v = R[0]
     mod = 1
@@ -574,9 +574,10 @@ def pose_apply(
         decimate_th: -1 to disable, suggest 0.001~0.1; **will modify curve handle ⚫→🔶**, decide to decimate current frame if `error=new-old < threshold`; aims to be editable
     """
     rot = get_bone_rotation_mode(armature)
-    method = str(kwargs.get('quat', 0))[0]
+    method = str(kwargs.get('rot', 0)).lower()
+    method = method[0] if len(method) > 0 else ''
     if rot == 'QUATERNION':
-        if method == 'a':  # axis
+        if method == 'a':  # axis angle
             rots = quat_rotAxis(pose)
         elif method == 'r':  # raw
             rots = pose

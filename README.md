@@ -7,3 +7,18 @@
 Currently support gvhmr as `.npz` file.
 
 ![screenshot](doc/addon.png)
+
+## TODO
+PR welcome! (ゝ∀･)
+
+- Import all motion:
+  - at 0 frame/at begin_frame(described in npz)
+  - on same person/ auto new person
+
+- bones remapping to UE Mannequin 
+- make wilor predict hands ID continuously
+- [track camera from gvhmr](https://github.com/zju3dv/GVHMR/issues/30)
+- bbox_viewer.blender
+- only import selected bones
+- remember which .npz for each armature
+- auto T-pose by mesh, then apply modifier with keeping shape key, then rokoko retargeting
