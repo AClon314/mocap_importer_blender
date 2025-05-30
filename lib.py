@@ -13,6 +13,7 @@ DIR_SELF = os.path.dirname(__file__)
 DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
 MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
 TYPE_MAPPING = Literal['smpl', 'smplx']
+TYPE_MAPPING_KEYS = Literal['BONES', 'BODY', 'HANDS', 'HEAD']
 TYPE_RUN = Literal['gvhmr', 'wilor']
 T = TypeVar('T')
 TN = np.ndarray
@@ -633,6 +634,83 @@ def rotMat(arr: TN):
         return euler_to_rotMat(arr)
     else:
         raise ValueError(f"Last dimension must be 3 or 4, but got {arr.shape[-1]}")
+
+
+def mano_to_smplx(
+    body_pose: 'np.ndarray',
+    hand_pose: 'np.ndarray',
+    global_orient: 'np.ndarray',
+    base_frame=0,
+    is_left=False,
+    left_fix=False,
+):
+    """
+    hand to body pose:
+    https://github.com/VincentHu19/Mano2Smpl-X/blob/main/mano2smplx.py
+
+    Args:
+        - body_pose (np.array): SMPLX's local pose (22, 3 or 4)
+        - hand_pose (np.array): MANO's local pose (15, 3 or 4)
+        - global_orient (np.array): **hand**'s global orientation (?, 3 or 4)
+        - base_frame (int): the frame to use as a reference for relative rotation
+        - is_left (bool): whether the hand is left or right
+        - left_fix (bool): whether to mirror the left hand pose, for hamer
+
+    ---
+    Returns
+    ---
+        - wrist_pose (np.array): SMPLX's local pose (3 or 4), re-calculate based on `body_write` & hans's `global_orient`
+        - hand_pose (np.array): SMPLX's local pose (15, 3 or 4), mirrored if is_left
+    """
+    Log.debug(f'{body_pose.shape=}')
+    Log.debug(f'{global_orient.shape=}')
+
+    M = np.diag([-1, 1, 1])  # Preparing for the left hand switch
+    global_orient = rotMat(global_orient)
+    if is_left:
+        idx_elbow = 19  # +1 offset due to root bone
+        if left_fix:
+            global_orient = M @ global_orient @ M  # mirror
+            hand_pose = rotMat(hand_pose)
+            hand_pose = M @ hand_pose @ M
+            hand_pose = rotMat_to_quat(hand_pose)
+    else:
+        idx_elbow = 20
+    body_elbow = body_pose[:, idx_elbow]
+    body_elbow = rotMat(body_elbow)
+
+    if body_elbow.shape[0] < global_orient.shape[0]:
+        # body < hand, padding body from the last frame
+        pad_size = global_orient.shape[0] - body_elbow.shape[0]
+        body_elbow = np.pad(body_elbow, ((0, pad_size), (0, 0), (0, 0)), mode='edge')
+    else:
+        # body > hand, clip body
+        body_elbow = body_elbow[:global_orient.shape[0]]
+
+    wrist_pose = np.linalg.inv(body_elbow) @ global_orient
+    wrist_pose = rotMat_relative(wrist_pose, base_frame=base_frame)
+    wrist_pose = rotMat_to_quat(wrist_pose)
+    Log.debug(f'{wrist_pose.shape=}')
+    return wrist_pose, hand_pose
+
+
+def rotMat_relative(rotMats: 'np.ndarray', base_frame=0):
+    """
+    重新计算相对于指定帧的相对旋转
+
+    Args:
+        rotMats (np.array): 旋转矩阵数组，形状为 (frames, 3, 3)
+        base_frame (int): 作为零旋转参考的帧索引
+
+    Returns:
+        np.array: 相对于参考帧的旋转矩阵数组
+    """
+    zero_rot = rotMats[base_frame]
+    zero_rot_inv = np.linalg.inv(zero_rot)
+    results = np.zeros_like(rotMats)
+    for i in range(rotMats.shape[0]):
+        results[i] = zero_rot_inv @ rotMats[i]
+    return results
 
 
 def register():

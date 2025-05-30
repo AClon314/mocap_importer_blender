@@ -2,7 +2,7 @@ import os
 import re
 import bpy
 import numpy as np
-from .lib import DIR_MAPPING, MAPPING_TEMPLATE, TYPE_MAPPING, TYPE_RUN, Log, Map, MotionData, bone_to_dict, euler, get_major, get_mapping, get_similar, keys_BFS, quat, quat_rotAxis
+from .lib import DIR_MAPPING, MAPPING_TEMPLATE, TYPE_MAPPING, TYPE_MAPPING_KEYS, TYPE_RUN, Log, Map, MotionData, bone_to_dict, euler, get_major, get_mapping, get_similar, keys_BFS, quat, quat_rotAxis
 from time import time
 from numbers import Number
 from contextlib import contextmanager
@@ -474,12 +474,10 @@ def guess_obj_mapping(obj: 'bpy.types.Object') -> TYPE_MAPPING:
     return mapping  # type: ignore
 
 
-def check_before_run(
-    data: MotionData,
-    key: str,
-    run: TYPE_RUN,
+def get_bones(
+    armature: 'bpy.types.Object',
+    key: TYPE_MAPPING_KEYS = 'BONES',
     mapping: TYPE_MAPPING | None = None,
-    Slice=slice(0, None),
 ):
     """
     guess mapping[smpl,smplx]/Range_end/bone_rotation_mode[eular,quat]
@@ -489,24 +487,24 @@ def check_before_run(
     data, BODY, armature, Slice = check_before_run(data, 'BODY', 'gvhmr', mapping, Slice)
     ```
     """
-    data = data(mapping=data.mapping, run=run)  # type: ignore
-    armature = get_armatures()[0]
-
     mapping = None if mapping == 'auto' else mapping
     mapping = get_mapping(mapping=mapping, armature=armature)
-    BONES: list[str] = getattr(Map()[mapping], key, getattr(Map()[mapping], 'BONES'))   # type:ignore
-    Log.debug("mapping from {}".format(f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping))
+    BONES: list[str] = getattr(Map()[mapping], key)   # type:ignore
+    # Log.debug("mapping from {}".format(f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping))
+    return BONES
 
+
+def get_slice(data: MotionData, Slice: slice):
     if Slice.stop is None:
         Len = len(data('global_orient').value)   # TODO: 使用专有信息 npz['meatadata'](dtype=object) as dict
         t = list(Slice.indices(Len))
         t[1] = Len
         Slice = slice(*t)
         Log.info(f'Frame range (Slice) fallback to {Slice}')
-    return data, BONES, armature, Slice
+    return Slice
 
 
-def get_bone_rotation_mode(armature):
+def get_bone_rotation_mode(armature: 'bpy.types.Object'):
     bones_rots: list[TYPE_ROT] = [b.rotation_mode for b in armature.pose.bones]
     rot = get_major(bones_rots)
     rot = 'QUATERNION' if not rot else rot
@@ -529,6 +527,64 @@ BONES_TREE = {tree}"""
         S += '\nget_bones_global_rotation:\n' + str(get_bones_global_rotation(armature=armature, bone_resort=List, Slice=slice(cur, cur + 1)))
         S += '\nget_bones_relative_rotation:\n' + str(get_bones_relative_rotation(armature=armature, bone_resort=List, Slice=slice(cur, cur + 1)))
     return S
+
+
+def init_0(data: MotionData, Slice: slice, run: TYPE_RUN):
+    data = data(mapping=data.mapping, run='gvhmr')  # type: ignore
+    name = ';'.join([data.who, data.run])
+    Slice = get_slice(data, Slice)
+
+    transl = data('transl').value[Slice]
+    rotate = data('global_orient').value[Slice]
+    return data, Slice, name, transl, rotate
+
+
+def init_1(mapping: TYPE_MAPPING | None = None, key: TYPE_MAPPING_KEYS = 'BONES'):
+    armature = get_armatures()[0]
+    BODY = get_bones(armature, key=key, mapping=mapping)
+    return armature, BODY
+
+
+def decimate(
+    action: 'bpy.types.Action',
+    bones: Sequence[str],
+    clean_th: float,
+    decimate_th: float,
+    rots,
+    keep_end: bool = False,
+):
+    if clean_th <= 0 and decimate_th <= 0:
+        return
+    # TODO: FK转IK，旋转→位置，平滑动画
+    # TODO: ⭐复制优化前动画，二分法调整threshold直到用户满意（方便后期手工曲线编辑）⭐
+    # TODO: 增加armatures参数，未处理多骨架同时导入
+    with temp_override(area='GRAPH_EDITOR', mode='global') as context:
+        obj = context.active_object
+        old_show = context.area.spaces[0].dopesheet.show_only_selected
+        context.area.spaces[0].dopesheet.show_only_selected = True
+
+        old_bones = [b for b in obj.pose.bones if not b.bone.select]
+        for b in old_bones:
+            b.bone.select = True
+
+        # exclude = [1] if keep_begin else []
+        exclude = [len(rots)] if keep_end else []
+        for fcurve in action.fcurves:
+            # 过滤掉非关键通道（如位置通道可能不需要处理）
+            if not any(b in fcurve.data_path for b in bones):
+                continue
+            for keyframe in fcurve.keyframe_points:
+                if keyframe.co[0] in exclude:
+                    keyframe.select_control_point = False
+
+        if clean_th > 0:
+            bpy.ops.graph.clean(threshold=clean_th, channels=False)
+        if decimate_th > 0:
+            bpy.ops.graph.decimate(remove_error_margin=decimate_th, mode='ERROR')
+
+        context.area.spaces[0].dopesheet.show_only_selected = old_show
+        for b in old_bones:
+            b.bone.select = False
 
 
 def pose_reset(
@@ -592,45 +648,29 @@ def pose_apply(
         if transl_base is not None:
             transl = transl - transl_base
             add_keyframes(action, transl_base, frame, f'location', 'Object Transforms')
-        add_keyframes(action, transl, 1, f'pose.bones["{bones[0]}"].location', bones[0])
+        add_keyframes(action, transl, frame, f'pose.bones["{bones[0]}"].location', bones[0])
 
     bones = bones[1:] if bones[0] == 'root' else bones  # Skip root!
     with progress_mouse(len(bones) * len(rots)) as update:
         for i, B in enumerate(bones):
             add_keyframes(action, rots[:, i], frame, path.format(B), B, update=update)
 
-    is_clean = clean_th > 0
-    is_decimate = decimate_th > 0
-    if is_clean or is_decimate:
-        # TODO: FK转IK，旋转→位置，平滑动画
-        # TODO: ⭐复制优化前动画，二分法调整threshold直到用户满意（方便后期手工曲线编辑）⭐
-        # TODO: 增加armatures参数，未处理多骨架同时导入
-        with temp_override(area='GRAPH_EDITOR', mode='global') as context:
-            obj = context.active_object
-            old_show = context.area.spaces[0].dopesheet.show_only_selected
-            context.area.spaces[0].dopesheet.show_only_selected = True
-
-            old_bones = [b for b in obj.pose.bones if not b.bone.select]
-            for b in old_bones:
-                b.bone.select = True
-
-            # exclude = [1] if keep_begin else []
-            exclude = [len(rots)] if keep_end else []
-            for fcurve in action.fcurves:
-                # 过滤掉非关键通道（如位置通道可能不需要处理）
-                if not any(b in fcurve.data_path for b in bones):
-                    continue
-                for keyframe in fcurve.keyframe_points:
-                    if keyframe.co[0] in exclude:
-                        keyframe.select_control_point = False
-
-            if is_clean:
-                bpy.ops.graph.clean(threshold=clean_th, channels=False)
-            if is_decimate:
-                bpy.ops.graph.decimate(remove_error_margin=decimate_th, mode='ERROR')
-
-            context.area.spaces[0].dopesheet.show_only_selected = old_show
-            for b in old_bones:
-                b.bone.select = False
+    decimate(action, bones, clean_th, decimate_th, rots, keep_end)
     pose_reset(action, bones, rot)
     return action
+
+
+def transform_apply(
+    obj: 'bpy.types.Object',
+    action: 'bpy.types.Action',
+    rotate: 'np.ndarray | None' = None,
+    transl: 'np.ndarray | None' = None,
+    frame: int = 1,
+):
+    rot = obj.rotation_mode
+    path = 'rotation_quaternion' if rot == 'QUATERNION' else 'rotation_euler'
+    if transl is not None:
+        add_keyframes(action, transl, frame, 'location', 'Object Transforms')
+    if rotate is not None:
+        with progress_mouse(len(rotate)) as update:
+            add_keyframes(action, rotate, frame, path, 'Object Transforms', update=update)

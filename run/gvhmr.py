@@ -1,5 +1,5 @@
 from ..lib import *
-from ..b import check_before_run, pose_apply, bpy_action
+from ..b import init_0, init_1, pose_apply, bpy_action, transform_apply
 
 
 def gvhmr(
@@ -21,13 +21,17 @@ def gvhmr(
     gvhmr(data('smplx', 'gvhmr', person=0))
     ```
     """
-    data, BODY, armature, Slice = check_before_run(data, 'BODY', 'gvhmr', mapping, Slice)
+    data, Slice, name, transl, rotate = init_0(data, Slice, run='gvhmr')
+    body_pose = data('body_pose')
+    if not body_pose:
+        obj = bpy.context.selected_objects[0]
+        with bpy_action(obj, name) as action:
+            transform_apply(obj=obj, action=action, rotate=rotate, transl=transl)
+        return
 
-    transl = data('transl', 'global').value[Slice]
-    rotate = data('global_orient', 'global').value[Slice]
+    armature, BODY = init_1(mapping, key='BODY')
     rotate = rotate.reshape(-1, 1, rotate.shape[-1])
-    pose = data('body_pose', 'global').value[Slice]
+    pose = body_pose.value[Slice]
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3 or 4)
-
-    with bpy_action(armature, ';'.join([data.who, data.run])) as action:
+    with bpy_action(armature, name) as action:
         pose_apply(armature=armature, action=action, pose=pose, transl=transl, transl_base=transl[base_frame], bones=BODY, **kwargs)

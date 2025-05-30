@@ -6,7 +6,7 @@ id = "mocap_importer"
 maintainer = "Nolca"
 name = "mocap-importer"
 tagline = "Import mocap data based on smpl-x model, support gvhmr, wilor, tram... Suggest to use with **mocap-wrapper**"
-version = "0.2.0"
+version = "0.2.1"
 # Supported types: "add-on", "theme"
 type = "add-on"
 
