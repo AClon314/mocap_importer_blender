@@ -327,7 +327,7 @@ def progress_mouse(*Range: float, is_percent=True):
 
     Args:
         is_percent: if True, convert Range into 0\\~10000 for **‱**
-        Range: if Range is None and is_percent == True, fallback to 0\\~10000  
+        Range: if Range is None and is_percent == True, fallback to 0\\~10000
         if len(Range) != 3 and is_percent == True, show **‱**, auto set step for 10 thousandths
         Mod: reduce UI update. if Mod == 0, will auto decide Mod number.
     """
@@ -376,12 +376,29 @@ def progress_mouse(*Range: float, is_percent=True):
     wm.progress_end()
 
 
+def select_armature(deselect=True, exclude_name=set()):
+    """Select armatures in the scene"""
+    if deselect:
+        bpy.ops.object.select_all(action='DESELECT')
+    armatures = [obj for obj in bpy.context.scene.objects if obj.type == 'ARMATURE']
+    if exclude_name:
+        armatures = [obj for obj in armatures if obj.name not in exclude_name]
+    for obj in armatures:
+        obj.select_set(True)
+    return armatures
+
+
 def get_armatures(armatures: 'list[bpy.types.Object] | None' = None):
     """if None, always get active(selected) armature"""
     if not armatures:
         armatures = bpy.context.selected_objects
     if not armatures:
-        raise ValueError('Please select an armature')
+        if hasattr(bpy.ops.scene, 'smplx_add_gender'):
+            exclude = {e.name for e in bpy.context.scene.objects}
+            bpy.ops.scene.smplx_add_gender()    # type:ignore
+            return select_armature(exclude_name=exclude)
+        else:
+            raise ValueError(f'Please select an armature or install smpl-x blender addon: {e}')
     for armature in armatures:
         if armature.type != 'ARMATURE':
             raise ValueError(f'Not an armature: {armature.name}')
@@ -553,6 +570,9 @@ def decimate(
     rots,
     keep_end: bool = False,
 ):
+    '''
+    Would raise AttributeError if can't find GRAPH_EDITOR area.
+    '''
     if clean_th <= 0 and decimate_th <= 0:
         return
     # TODO: FK转IK，旋转→位置，平滑动画
@@ -655,7 +675,10 @@ def pose_apply(
         for i, B in enumerate(bones):
             add_keyframes(action, rots[:, i], frame, path.format(B), B, update=update)
 
-    decimate(action, bones, clean_th, decimate_th, rots, keep_end)
+    try:
+        decimate(action, bones, clean_th, decimate_th, rots, keep_end)
+    except AttributeError as e:
+        Log.error(f'Failed to decimate: {e}')
     pose_reset(action, bones, rot)
     return action
 

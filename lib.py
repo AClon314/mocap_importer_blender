@@ -1,6 +1,7 @@
 """
 https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blender.py
 """
+from ast import Index
 import os
 import bpy
 import sys
@@ -72,12 +73,27 @@ def items_mapping(self=None, context=None):
 
 def items_motions(self=None, context=None):
     """TODO: this func will trigger when redraw, so frequently"""
-    items: List[tuple[str, str, str]] = []
+    all = ['all', 'All', 'len={}. All motion data belows']
+    items: List[tuple[str, str, str]] = []    # type: ignore
     if MOTION_DATA is None:
         load_data()
     if MOTION_DATA is not None:
-        for k in MOTION_DATA.whos:
-            items.append((k, k, ''))
+        keys: dict[str, list] = {}
+        for k in MOTION_DATA.keys():
+            try:
+                _k = k.split(';')
+                key = ';'.join(_k[1:4])  # mapping;run;start
+                _customKeys = ';'.join(_k[4:])
+                if key not in keys:
+                    keys[key] = [_customKeys]
+                else:
+                    keys[key].append(_customKeys)
+            except IndexError:
+                keys[k] = [k + '(indexError)']
+        for k, L in keys.items():
+            items.append((k, k, f'len={len(L)}: {L}'))
+        all[-1] = all[-1].format(len(keys))  # type: ignore
+        items.insert(0, tuple(all))  # type: ignore
     return items
 
 

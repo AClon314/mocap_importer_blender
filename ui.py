@@ -59,10 +59,17 @@ class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
         row = col.row(align=True)
         row.prop(props, 'input_file', icon='FILE_MOVIE', text='')
         row.operator('mocap.load_file', icon='FILE_FOLDER', text='')
-        col.prop(props, 'motions', icon='ACTION', text='')
-
-        col = layout.column()
-        col.operator('mocap.apply', icon='ARMATURE_DATA')
+        row = col.row(align=True)
+        row.operator('mocap.bbox', icon='SHADING_BBOX', text='')
+        split = row.split(factor=0.75, align=True)
+        split.prop(props, 'motions', text='')  # icon='ACTION'
+        if context.selected_objects:
+            apply_icon = 'ARMATURE_DATA'
+            apply_text = 'Apply'
+        else:
+            apply_icon = 'OUTLINER_OB_ARMATURE'
+            apply_text = 'Add'
+        split.operator('mocap.apply', icon=apply_icon, text=apply_text)
 
 
 class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
@@ -109,9 +116,9 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
 
 class ApplyMocap_Operator(bpy.types.Operator):
     bl_idname = 'mocap.apply'
-    bl_label = 'Apply Mocap'
+    bl_label = 'Apply'
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = 'Apply Mocap data from npz file.'
+    bl_description = 'Apply selected mocap data from npz file.'
 
     @execute
     def execute(self, context):
@@ -119,7 +126,34 @@ class ApplyMocap_Operator(bpy.types.Operator):
         mapping = None if props.mapping == 'Auto detect' else props.mapping
         kw = {k: v for k, v in props.items()}
         kwargs = eval(f'dict({props.debug_kwargs})')
-        apply(props.motions, mapping=mapping, **kwargs, **kw)
+        is_selected = context.selected_objects
+        if props.motions == 'all':
+            motions = [m[0] for m in items_motions()]
+            motions.remove(motions[0])  # remove 'all' option
+            motions = [m for m in motions if 'cam@' not in m]
+            for who in motions:
+                try:
+                    apply(who, mapping=mapping, **kwargs, **kw)
+                except Exception as e:
+                    Log.error(f'Error applying motion {who}: {e}')
+                if not is_selected:
+                    bpy.ops.object.select_all(action='DESELECT')
+        else:
+            apply(props.motions, mapping=mapping, **kwargs, **kw)
+        return {'FINISHED'}
+
+
+class Bbox_Operator(bpy.types.Operator):
+    bl_idname = 'mocap.bbox'
+    bl_label = 'Check bbox'
+    bl_description = 'Apply bbox from npz file.'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @execute
+    def execute(self, context):
+        props = Props(context)
+        kw = {k: v for k, v in props.items()}
+        apply('bbox', **kw)
         return {'FINISHED'}
 
 
@@ -231,7 +265,7 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
     input_file: bpy.props.StringProperty(
         name='Input',
         description=LoadFile_Operator.bl_description,
-        default='mocap_example.npz',
+        default='mocap_*.npz',
         # subtype='FILE_PATH',
         update=load_data,
     )  # type: ignore
@@ -239,7 +273,6 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         name='Action',
         description='load which motion action',
         items=items_motions,
-        default=0,
     )  # type: ignore
     keep_end: bpy.props.BoolProperty(
         name='End Frame',
@@ -250,7 +283,6 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         name='Mapping',
         description='re-mapping to which bones struct',
         items=items_mapping,
-        default=0,
     )  # type: ignore
     base_frame: bpy.props.IntProperty(
         name='Frame',
