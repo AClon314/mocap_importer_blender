@@ -22,6 +22,10 @@ def gvhmr(
     ```
     """
     data, Slice, name, transl, rotate = init_0(data, Slice, run='gvhmr')
+    if transl:
+        kw = dict(transl_base=transl[base_frame])
+    else:
+        kw = {}
     body_pose = data('body_pose')
     if not body_pose:
         obj = bpy.context.selected_objects[0]
@@ -34,4 +38,4 @@ def gvhmr(
     pose = body_pose.value[Slice]
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3 or 4)
     with bpy_action(armature, name) as action:
-        pose_apply(armature=armature, action=action, pose=pose, transl=transl, transl_base=transl[base_frame], bones=BODY, **kwargs)
+        pose_apply(armature=armature, action=action, pose=pose, transl=transl, bones=BODY, frame=data.begin + 1, **kw, **kwargs)

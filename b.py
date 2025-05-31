@@ -547,11 +547,13 @@ BONES_TREE = {tree}"""
 
 
 def init_0(data: MotionData, Slice: slice, run: TYPE_RUN):
-    data = data(mapping=data.mapping, run='gvhmr')  # type: ignore
+    data = data(mapping=data.mapping, run=run)  # type: ignore
     name = ';'.join([data.who, data.run])
     Slice = get_slice(data, Slice)
 
-    transl = data('transl').value[Slice]
+    transl = None
+    if 'transl' in data.keys():
+        transl = data('transl').value[Slice]
     rotate = data('global_orient').value[Slice]
     return data, Slice, name, transl, rotate
 
@@ -566,7 +568,6 @@ def bbox(
     who: str,
     video: str | None = None,
     Slice: slice | None = None,
-    frame: int = 1,
     **kwargs,
 ):
     """
@@ -580,11 +581,11 @@ def bbox(
         bpy.types.Object: 生成的bbox物体
     """
     # get motion data
-    data = get_motion_data(who)('bbox')
+    _data = get_motion_data(who)('bbox')
     if Slice:
-        data = data[Slice]
+        _data = _data[Slice]
     # shape: (总帧数, 4)，格式：[x, y, X, Y]（xy=左上，XY=右下）
-    data = data.value
+    data = _data.value
     total_frames = data.shape[0]
 
     if (video_plane := bpy.context.active_object) and video_plane.type == 'MESH' and video_plane.name.startswith('video:'):
@@ -620,19 +621,19 @@ def bbox(
 
         # 计算bbox中心坐标（在视频平面内）
         center_x = (norm_x + norm_X) / 2 - 0.5  # 转换为[-0.5, 0.5]范围（视频平面宽度1）
-        center_y = (norm_y + norm_Y) / 2 - (ratio / 2)  # 转换为[-h/(2w), h/(2w)]范围
+        center_y = ((norm_y + norm_Y) / 2 - 0.5) * ratio  # 先转换为[-0.5, 0.5]，再缩放到[-ratio/2, ratio/2]
 
         # 计算bbox缩放比例（相对于视频平面）
         scale_x = (norm_X - norm_x)   # 宽度占视频宽度的比例
-        scale_y = (norm_Y - norm_y)   # 高度占视频高度的比例（已适配宽高比）
+        scale_y = (norm_Y - norm_y) * ratio   # 高度占视频高度的比例（已适配宽高比）
 
         # 存储位置和缩放数据
         locations[frame_idx] = [center_x, center_y, HEIGHT]
         scales[frame_idx] = [scale_x, scale_y, 1]
 
     with bpy_action(bbox_obj, name=f"bbox:{who}", nla_push=False) as action:
-        add_keyframes(action, locations, frame, "location", "Object Transforms")
-        add_keyframes(action, scales, frame, "scale", "Object Transforms")
+        add_keyframes(action, locations, _data.begin + 1, "location", "Object Transforms")
+        add_keyframes(action, scales, _data.begin + 1, "scale", "Object Transforms")
     video_plane.select_set(True)
     bpy.context.view_layer.objects.active = video_plane
     return bbox_obj

@@ -14,7 +14,7 @@ PR welcome! (ゝ∀･)
 - only import selected bones
 - remember which .npz for each armature
 
-draft,done partly, not perfect:
+draft, done partly, not perfect:
 - bones remapping to UE Mannequin (external roroko addon)
   - auto T-pose by mesh, then apply modifier with keeping shape key, then rokoko retargeting
 - bbox viewer

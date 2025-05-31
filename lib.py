@@ -178,7 +178,7 @@ class MotionData(dict):
     @property
     def whos(self): return self.distinct(2)
     @property
-    def begins(self): return self.distinct(3)
+    def begins(self): return [int(x) for x in self.distinct(3)]
 
     def props(self, col=0):
         """
@@ -195,6 +195,8 @@ class MotionData(dict):
     def run(self): return warn_or_return_first(self.runs)
     @property
     def who(self): return warn_or_return_first(self.whos)
+    @property
+    def begin(self): return warn_or_return_first(self.begins)
     def prop(self, col=0): return self.props(col)[0]
 
     @property

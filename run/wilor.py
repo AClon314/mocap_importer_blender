@@ -54,4 +54,4 @@ def wilor(
         base_frame=base_frame, is_left=is_left)
     hand_pose, HAND = wrist_hand(wrist_rotate, hand_pose, BODY, HAND, is_left=is_left)
     with bpy_action(armature, name) as action:
-        pose_apply(armature=armature, action=action, pose=hand_pose, bones=HAND, **kwargs)
+        pose_apply(armature=armature, action=action, pose=hand_pose, bones=HAND, frame=data.begin + 1, **kwargs)
