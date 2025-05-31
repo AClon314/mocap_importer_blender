@@ -314,11 +314,16 @@ def get_mapping(mapping: TYPE_MAPPING | None = None, armature=None):
     return mapping
 
 
-def apply(who: str | int, mapping: TYPE_MAPPING | None, **kwargs):
-    global MOTION_DATA
+def get_motion_data(who):
+    '''access global var'''
     if MOTION_DATA is None:
         raise ValueError('Failed to load motion data')
     data = MOTION_DATA(mapping='smplx', who=who)
+    return data
+
+
+def apply(who: str | int, mapping: TYPE_MAPPING | None, **kwargs):
+    data = get_motion_data(who)
     for r in data.runs:
         run = getattr(Run()[r], r)
         run(data, mapping=mapping, **kwargs)

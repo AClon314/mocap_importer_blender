@@ -3,7 +3,7 @@
 import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 from .logger import _PKG_
-from .b import add_mapping, get_bones_info
+from .b import add_mapping, bbox, get_bones_info
 from .lib import DIR_MAPPING, Log, items_mapping, items_motions, load_data, apply
 VIDEO_EXT = "webm,mkv,flv,flv,vob,vob,ogv,ogg,drc,gifv,webm,gifv,mng,avi,mov,qt,wmv,yuv,rm,rmvb,viv,asf,amv,mp4,m4p,m4v,mpg,mp2,mpeg,mpe,mpv,mpg,mpeg,m2v,m4v,svi,3gp,3g2,mxf,roq,nsv,flv,f4v,f4p,f4a,f4b".split(',')
 BL_ID = 'MOCAP_PT_Panel'
@@ -59,17 +59,16 @@ class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
         row = col.row(align=True)
         row.prop(props, 'input_file', icon='FILE_MOVIE', text='')
         row.operator('mocap.load_file', icon='FILE_FOLDER', text='')
+        col.prop(props, 'motions', icon='ACTION', text='')
         row = col.row(align=True)
-        row.operator('mocap.bbox', icon='SHADING_BBOX', text='')
-        split = row.split(factor=0.75, align=True)
-        split.prop(props, 'motions', text='')  # icon='ACTION'
+        row.operator('mocap.bbox', icon='SHADING_BBOX')
         if context.selected_objects:
             apply_icon = 'ARMATURE_DATA'
             apply_text = 'Apply'
         else:
             apply_icon = 'OUTLINER_OB_ARMATURE'
             apply_text = 'Add'
-        split.operator('mocap.apply', icon=apply_icon, text=apply_text)
+        row.operator('mocap.apply', icon=apply_icon, text=apply_text)
 
 
 class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
@@ -114,6 +113,28 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
         # col.prop(props, 'debug_eval', icon='CONSOLE', text='')
 
 
+def all_or_one(context, func=apply):
+    props = Props(context)
+    mapping = None if props.mapping == 'Auto detect' else props.mapping
+    _kw = {k: v for k, v in props.items()}
+    _kw_debug = eval(f'dict({props.debug_kwargs})')
+    kw = dict(mapping=mapping, npz=props.input_file, **_kw_debug, **_kw)
+    is_selected = context.selected_objects
+    if props.motions == 'all':
+        motions = [m[0] for m in items_motions()]
+        motions.remove(motions[0])  # remove 'all' option
+        motions = [m for m in motions if 'cam@' not in m]
+        for who in motions:
+            try:
+                func(who=who, **kw)
+            except Exception as e:
+                Log.error(f'Error {who}: {e}')
+            if not is_selected:
+                bpy.ops.object.select_all(action='DESELECT')
+    else:
+        func(who=props.motions, **kw)
+
+
 class ApplyMocap_Operator(bpy.types.Operator):
     bl_idname = 'mocap.apply'
     bl_label = 'Apply'
@@ -122,38 +143,19 @@ class ApplyMocap_Operator(bpy.types.Operator):
 
     @execute
     def execute(self, context):
-        props = Props(context)
-        mapping = None if props.mapping == 'Auto detect' else props.mapping
-        kw = {k: v for k, v in props.items()}
-        kwargs = eval(f'dict({props.debug_kwargs})')
-        is_selected = context.selected_objects
-        if props.motions == 'all':
-            motions = [m[0] for m in items_motions()]
-            motions.remove(motions[0])  # remove 'all' option
-            motions = [m for m in motions if 'cam@' not in m]
-            for who in motions:
-                try:
-                    apply(who, mapping=mapping, **kwargs, **kw)
-                except Exception as e:
-                    Log.error(f'Error applying motion {who}: {e}')
-                if not is_selected:
-                    bpy.ops.object.select_all(action='DESELECT')
-        else:
-            apply(props.motions, mapping=mapping, **kwargs, **kw)
+        all_or_one(context, apply)
         return {'FINISHED'}
 
 
 class Bbox_Operator(bpy.types.Operator):
     bl_idname = 'mocap.bbox'
-    bl_label = 'Check bbox'
-    bl_description = 'Apply bbox from npz file.'
+    bl_label = 'bbox'
+    bl_description = 'preview bbox from npz file.'
     bl_options = {'REGISTER', 'UNDO'}
 
     @execute
     def execute(self, context):
-        props = Props(context)
-        kw = {k: v for k, v in props.items()}
-        apply('bbox', **kw)
+        all_or_one(context, bbox)
         return {'FINISHED'}
 
 
