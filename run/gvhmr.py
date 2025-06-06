@@ -22,7 +22,7 @@ def gvhmr(
     ```
     """
     data, Slice, name, transl, rotate = init_0(data, Slice, run='gvhmr')
-    if transl:
+    if transl is not None:
         kw = dict(transl_base=transl[base_frame])
     else:
         kw = {}

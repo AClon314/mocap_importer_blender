@@ -149,8 +149,9 @@ class ApplyMocap_Operator(bpy.types.Operator):
 
 class Bbox_Operator(bpy.types.Operator):
     bl_idname = 'mocap.bbox'
-    bl_label = 'bbox'
-    bl_description = 'preview bbox from npz file.'
+    bl_label = 'Boundary'  # TODO 'Bounding Box' is not translated
+    bl_translation_context = 'Brush'
+    bl_description = 'see bbox from npz file.'
     bl_options = {'REGISTER', 'UNDO'}
 
     @execute

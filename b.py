@@ -551,9 +551,11 @@ def init_0(data: MotionData, Slice: slice, run: TYPE_RUN):
     name = ';'.join([data.who, data.run])
     Slice = get_slice(data, Slice)
 
-    transl = None
-    if 'transl' in data.keys():
-        transl = data('transl').value[Slice]
+    transl = data('transl')
+    if any(transl):
+        transl = transl.value[Slice]
+    else:
+        transl = None
     rotate = data('global_orient').value[Slice]
     return data, Slice, name, transl, rotate
 
