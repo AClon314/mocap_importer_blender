@@ -1,7 +1,6 @@
 """
-https://github.com/carlosedubarreto/CEB_4d_Humans/blob/main/four_d_humans_blender.py
+lib.py is a share lib that not rely on bpy module
 """
-from ast import Index
 import os
 import bpy
 import sys
@@ -52,7 +51,7 @@ def Mod(Dir='mapping'):
             pys.append(f[:-3])
     for p in pys:
         mod = importlib.import_module(f'.{Dir}.{p}', package=__package__)
-        mods.update({p: mod})
+        mods[p] = mod
     return mods
 
 

@@ -1,3 +1,6 @@
+'''
+b.py means a share lib of bpy
+'''
 import os
 import re
 import bpy
@@ -345,31 +348,25 @@ def progress_mouse(*Range: float, is_percent=True):
     # Log.debug(f'progress🖱 {Range} → {R}', stack_info=False)
     i = 0
     v = R[0]
-    mod = 1
-    timer = time()
+    last_update_time = time()
+    update_interval = 0.5
 
     def update(Step: float | None = None, Set: float | None = None):
         """
         Args:
             Set: Any value between min and max as set in progress_mouse(Range=...)
         """
-        nonlocal i, v, mod, timer
-        i += 1
+        nonlocal v, last_update_time
         if Set is not None:
             v = Set
         elif Step is None:
             v += _step
         else:
             v += Step
-        if Set or i % mod < 1:
-            if timer > 0:
-                t = timer
-                timer = time()
-                if timer - t < 0.25:
-                    mod *= 2
-                else:
-                    timer = -1
+        current_time = time()
+        if current_time - last_update_time >= update_interval:
             wm.progress_update(v)
+            last_update_time = current_time
         return v
     yield update
     Log.debug(f'progress🖱 end {v}', stack_info=True)
