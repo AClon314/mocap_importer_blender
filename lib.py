@@ -6,9 +6,13 @@ import bpy
 import sys
 import importlib
 import numpy as np
+from time import time
+from collections import UserDict
+from contextlib import contextmanager
 from .logger import Log
 from types import ModuleType
-from typing import Dict, List, Sequence, Literal, TypeVar, get_args
+from typing import Dict, Sequence, Literal, TypeVar, get_args
+INF = float('inf')
 DIR_SELF = os.path.dirname(__file__)
 DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
 MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
@@ -34,12 +38,107 @@ def in_or_skip(part, full, pattern=''):
     return (not part) or (not full) or (part in full)
 
 
-def warn_or_return_first(L: List[T]) -> T:
+def warn_or_return_first(L: list[T]) -> T:
     """used in class `MotionData`"""
     Len = len(L)
     if Len > 1:
         Log.warning(f'{Len} > 1', extra={'report': False}, stack_info=True)
     return L[0]
+
+
+def format_sec(seconds: float):
+    if seconds == INF:
+        return '∞'
+    seconds = int(seconds)
+    m, s = divmod(seconds, 60)
+    return f"{s}s" if m == 0 else f"{m}:{s}"
+
+
+class Progress:
+    selves: dict['Progress', int] = {}
+    update_interval = 0.5
+    @property
+    def _dur_change(self): return time() - self._tick_change
+    @property
+    def time(self): return time() - self.tick_start
+    @property
+    def active_time(self): return self._dur_run if self.pause else self._dur_run + self._dur_change
+    @property
+    def done(self): return self._current - self.Range.start
+    @property
+    def percent(self): return self.done / (self.len) if self.len != 0 else INF
+    @property
+    def rate(self): return self.done / self.active_time if self.active_time != 0 else INF
+    @property
+    def eta(self): return (self.Range.stop - self._current) / self.rate if self.rate != 0 else INF
+    @property
+    def out_range(self): return self._current < self.Range.start or self._current >= self.Range.stop
+    def status(self): return f'{self.percent:.2%},{format_sec(self.eta)},{self.rate:.1f}{self.unit}/s'
+
+    @classmethod
+    def TIME(cls): return sum(s.time for s in cls.selves.keys())
+    @classmethod
+    def ACTIVE_TIME(cls): return sum(s.active_time for s in cls.selves.keys())
+    @classmethod
+    def LEN(cls): return sum(cls.selves.values())
+    @classmethod
+    def DONE(cls): return sum(s.done for s in cls.selves.keys())
+    @classmethod
+    def PERCENT(cls): return cls.DONE() / cls.LEN() if cls.LEN() != 0 else INF
+    @classmethod
+    def RATE(cls): return cls.DONE() / cls.ACTIVE_TIME() if cls.ACTIVE_TIME() != 0 else INF
+    @classmethod
+    def ETA(cls): return sum(s.eta for s in cls.selves.keys()) / cls.LEN() if cls.LEN() != 0 else INF
+    @classmethod
+    def STATUS(cls): return f'{cls.PERCENT():.2%},{format_sec(cls.ETA())},{cls.RATE():.1f}/s' if cls.LEN() > 0 else ''
+
+    @property
+    def current(self): return self._current
+    @property
+    def pause(self): return self._pause
+    @current.setter
+    def current(self, value: int): self.update(set=value)
+
+    @pause.setter
+    def pause(self, b: bool):
+        self._pause = b
+        if b:
+            self._dur_run += self._dur_change
+        self._tick_change = time()
+
+    def __init__(self, *Range: int, unit: str = 'frame', msg='', pause=False):
+        self.Range = range(*Range)
+        self.msg = msg
+        self.len = self.Range.stop - self.Range.start
+        self.unit = unit
+        self._current = self.Range.start
+        self.tick_start = self.tick_update = self._tick_change = time()
+        self._dur_run = 0
+        self._pause = pause
+        self.__class__.selves.update({self: self.len})
+
+    def update(self, step: int | None = None, set: int | None = None):
+        """
+        Args:
+            step: step to increase, if None, use `self.step`
+            set: Any value between min and max as set in Range=...
+        """
+        if self.pause:
+            self.__class__.selves.pop(self, None)
+            return self._current
+        if set is not None:
+            self._current = set
+        elif step is None:
+            self._current += self.Range.step
+        else:
+            self._current += step
+        now = time()
+        if now - self.tick_update >= self.update_interval:
+            # wm.progress_update(self.current)
+            self.tick_update = now
+        if self._current >= self.Range.stop:
+            self.pause = True
+        return self._current
 
 
 def Mod(Dir='mapping'):
@@ -56,7 +155,7 @@ def Mod(Dir='mapping'):
 
 
 def items_mapping(self=None, context=None):
-    items: List[tuple[str, str, str]] = [(
+    items: list[tuple[str, str, str]] = [(
         'auto', 'Auto',
         'Auto detect armature type, based on name (will enhanced in later version)')]
     for k, m in Map().items():
@@ -73,7 +172,7 @@ def items_mapping(self=None, context=None):
 def items_motions(self=None, context=None):
     """TODO: this func will trigger when redraw, so frequently"""
     all = ['all', 'All', 'len={}. All motion data belows']
-    items: List[tuple[str, str, str]] = []    # type: ignore
+    items: list[tuple[str, str, str]] = []    # type: ignore
     if MOTION_DATA is None:
         load_data()
     if MOTION_DATA is not None:
@@ -105,7 +204,7 @@ def load_data(self=None, context=None):
     MOTION_DATA = MotionData(npz=file)
 
 
-class MotionData(dict):
+class MotionData(UserDict):
     """
     usage:
     ```python
@@ -114,10 +213,10 @@ class MotionData(dict):
     ```
     """
 
-    def keys(self) -> List[str]:
+    def keys(self) -> list[str]:
         return list(super().keys())
 
-    def values(self) -> List[np.ndarray]:
+    def values(self) -> list[np.ndarray]:
         return list(super().values())
 
     def __init__(self, /, *args, npz: str | os.PathLike | None = None, lazy=False, **kwargs):
@@ -143,7 +242,7 @@ class MotionData(dict):
         # coord: Optional[Literal['global', 'incam']] = None,
     ):
         # Log.debug(f'self.__dict__={self.__dict__}')
-        D = MotionData(npz=self.npz, lazy=True)
+        MD = MotionData(npz=self.npz, lazy=True)
         if isinstance(who, int):
             who = f'person{who}'
 
@@ -152,8 +251,8 @@ class MotionData(dict):
             is_in = [in_or_skip(args, k, ';{};') for args in [mapping, run, who, *prop]]
             is_in = all(is_in)
             if is_in:
-                D[k] = v
-        return D
+                MD[k] = v
+        return MD
 
     def distinct(self, col_num: int):
         """
@@ -162,7 +261,7 @@ class MotionData(dict):
             literal : filter keys by Literal. Defaults to None.
 
         """
-        L: List[str] = []
+        L: list[str] = []
         for k in self.keys():
             keys = k.split(';')
             col_name = keys[col_num]
@@ -241,11 +340,11 @@ def log_array(arr: np.ndarray | list, name='ndarray'):
     return text
 
 
-def bone_to_dict(bone, whiteList: Sequence[str] | None = None):
+def bone_to_dict(bone, whitelist: Sequence[str] | None = None):
     """bone to dict, Recursive calls to this function form a tree"""
     # if deep_max and deep > deep_max:
     #     raise ValueError(f'Bones tree too deep, {deep} > {deep_max}')
-    return {child.name: bone_to_dict(child) for child in bone.children if in_or_skip(child.name, whiteList)}
+    return {child.name: bone_to_dict(child) for child in bone.children if in_or_skip(child.name, whitelist)}
 
 
 def keys_BFS(

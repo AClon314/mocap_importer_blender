@@ -4,17 +4,19 @@ import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 from .logger import _PKG_
 from .b import add_mapping, bbox, get_bones_info
-from .lib import DIR_MAPPING, Log, items_mapping, items_motions, load_data, apply
+from .lib import DIR_MAPPING, Progress, Log, items_mapping, items_motions, load_data, apply
 VIDEO_EXT = "webm,mkv,flv,flv,vob,vob,ogv,ogg,drc,gifv,webm,gifv,mng,avi,mov,qt,wmv,yuv,rm,rmvb,viv,asf,amv,mp4,m4p,m4v,mpg,mp2,mpeg,mpe,mpv,mpg,mpeg,m2v,m4v,svi,3gp,3g2,mxf,roq,nsv,flv,f4v,f4p,f4a,f4b".split(',')
 BL_ID = 'MOCAP_PT_Panel'
-BL_CATAGORY = 'SMPL-X'
+BL_CATAGORY = 'Animation'
 BL_SPACE = 'VIEW_3D'
 BL_REGION = 'UI'
 BL_CONTEXT = 'objectmode'
-def Props(context): return context.scene.mocap_importer
-def Layout(self) -> 'bpy.types.UILayout': return self.layout
+TIMER: list['TimerOperator'] = []
+def Props(context: bpy.types.Context) -> 'Mocap_PropsGroup': return context.scene.mocap_importer   # type: ignore
+def Layout(self: 'bpy.types.Panel') -> 'bpy.types.UILayout': return self.layout
 def Eval(self, context): return eval(self.debug_eval)
-# def Eval(self, context): ...
+def register(): bpy.types.Scene.mocap_importer = bpy.props.PointerProperty(type=Mocap_PropsGroup)   # type: ignore
+def unregister(): del bpy.types.Scene.mocap_importer    # type: ignore
 
 
 def execute(func):
@@ -45,7 +47,17 @@ class MAIN_PT_Panel(ExpandedPanel, bpy.types.Panel):
     bl_description = _PKG_
     bl_idname = BL_ID
     def draw(self, context): ...
-    def draw_header(self, context): Layout(self).label(text=self._bl_label, icon='OUTLINER_OB_ARMATURE')
+
+    def draw_header(self, context):
+        layout = Layout(self)
+        props = Props(context)
+        if Progress.LEN() > 0:
+            layout.progress(factor=Progress.PERCENT(), type='RING')
+            text = ' '.join([Progress.STATUS(), self._bl_label])
+        else:
+            text = self._bl_label
+            layout.label(icon='OUTLINER_OB_ARMATURE')
+        layout.label(text=text)
 
 
 class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
@@ -109,8 +121,66 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
         props = Props(context)
         col = layout.column()
         col.operator('armature.get_bones_info', icon='BONE_DATA')
+        col.operator('mocap.start_timer', icon='TIME')
+        col.operator('mocap.cancel', icon='CANCEL')
+        col.operator('mocap.pause', icon='PAUSE')
         col.prop(props, 'debug_kwargs', text='')
         # col.prop(props, 'debug_eval', icon='CONSOLE', text='')
+
+
+class TimerOperator(bpy.types.Operator):
+    bl_idname = "mocap.start_timer"
+    bl_label = "Timer"
+    timer = None
+
+    def modal(self, context, event):
+        props = Props(context)
+        if event.type == 'TIMER':
+            if not self.pg.pause:
+                if self.pg.out_range:
+                    self.cancel(context)
+                    return {'FINISHED'}
+                else:
+                    self.pg.update()
+        return {'PASS_THROUGH'}
+
+    def execute(self, context):
+        global TIMER
+        wm = context.window_manager
+        self.pg = Progress(10)
+        self.timer = wm.event_timer_add(self.pg.update_interval, window=context.window)
+        wm.modal_handler_add(self)
+        TIMER.append(self)
+        return {'RUNNING_MODAL'}
+
+    def cancel(self, context):
+        global TIMER
+        Log.debug(f'Cancel Timer, {len(TIMER)=}')
+        context.window_manager.event_timer_remove(self.timer) if self.timer else None
+        TIMER.remove(self) if self in TIMER else None
+
+
+class PauseOperator(bpy.types.Operator):
+    bl_idname = "mocap.pause"
+    bl_label = "Pause"
+    bl_description = "暂停正在运行的操作"
+
+    def execute(self, context):
+        for t in TIMER:
+            t.pg.pause = True
+        return {'FINISHED'}
+
+
+class CancelOperator(bpy.types.Operator):
+    bl_idname = "mocap.cancel"
+    bl_label = "Cancel"
+    bl_description = "取消正在运行的操作"
+
+    def execute(self, context):
+        # 这里简单清零进度，实际可扩展为查找并取消正在运行的 operator
+        [t.cancel(context) for t in TIMER if t]
+        Progress.selves.clear()
+        return {'FINISHED'}
 
 
 def all_or_one(context, func=apply):
@@ -243,27 +313,6 @@ class ReloadScriptOperator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class ModalTimerOperator(bpy.types.Operator):
-    """https://blender.stackexchange.com/a/305675/146607"""
-    bl_idname = "wm.modal_timer_operator"
-    bl_label = "Modal Timer Operator"
-    _timer = None
-
-    def modal(self, context, event):
-        [a.tag_redraw() for a in context.screen.areas]
-        if self._timer.time_duration > 3:
-            context.window_manager.progress = 1
-            return {'FINISHED'}
-        context.window_manager.progress = self._timer.time_duration / 3
-        return {'PASS_THROUGH'}
-
-    def execute(self, context):
-        wm = context.window_manager
-        self._timer = wm.event_timer_add(0.1, window=context.window)
-        wm.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
-
-
 class Mocap_PropsGroup(bpy.types.PropertyGroup):
     input_file: bpy.props.StringProperty(
         name='Input',
@@ -330,11 +379,3 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
     #     default="print('😄')",
     #     update=Eval,
     # )   # type: ignore
-
-
-def register():
-    bpy.types.Scene.mocap_importer = bpy.props.PointerProperty(type=Mocap_PropsGroup)   # type: ignore
-
-
-def unregister():
-    del bpy.types.Scene.mocap_importer    # type: ignore

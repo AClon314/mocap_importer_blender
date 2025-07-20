@@ -1,0 +1,3 @@
+[submodule "libs/FKtoIK"]
+	path = libs/FKtoIK
+	url = https://github.com/AClon314/FKtoIK
