@@ -40,7 +40,7 @@ extra={'mouse': True, 'report': True, 'log': True,
             is_mouse = False
             is_report = False
         else:
-            is_mouse: bool = Pop(extra, 'mouse', True)
+            is_mouse: bool = Pop(extra, 'mouse', level != logging.ERROR)
             is_report: bool = Pop(extra, 'report', True)
         is_log: bool = Pop(extra, 'log', not is_report)
         kwargs = dict(level=level, msg=msg, args=args, exc_info=exc_info, extra=extra, stack_info=stack_info, stacklevel=stacklevel)
@@ -52,10 +52,10 @@ extra={'mouse': True, 'report': True, 'log': True,
             if is_report and hasattr(self, 'report'):
                 self.report(type={lvl}, message=msg)   # type: ignore
             if is_log:
-                super()._log(**kwargs)
+                super()._log(**kwargs)  # type: ignore
         except Exception as e:
             kwargs['msg'] = f"{kwargs['msg']}\tLogError: {e}"
-            super()._log(**kwargs)
+            super()._log(**kwargs)  # type: ignore
 
 
 def getLogger(name=__name__, level=logging.DEBUG):
@@ -76,7 +76,7 @@ def getLogger(name=__name__, level=logging.DEBUG):
                 return super().format(record)
         stream_handler.setFormatter(
             CustomFormatter(
-                '%(levelname)s\t%(asctime)s  %(message)s',  # %(name)s:%(lineno)d
+                '%(levelname)s\t%(asctime)s %(message)s',  # %(name)s:%(lineno)d
                 datefmt='%H:%M:%S'))
         Log.addHandler(stream_handler)
     return Log

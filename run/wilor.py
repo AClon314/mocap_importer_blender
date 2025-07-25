@@ -1,5 +1,5 @@
 from ..lib import *
-from ..b import init_0, init_1, pose_apply, bpy_action, get_bones_global_rotation
+from ..b import *
 
 
 def wrist_hand(
@@ -39,8 +39,8 @@ def wilor(
     ```
     """
     # get hand data
-    data, Slice, name, transl, rotate = init_0(data, Slice, run='wilor')
-    armature, HAND = init_1(mapping, key='HANDS')
+    data, Slice, name, transl, rotate = data_Slice_name_transl_rotate(data, Slice, run='wilor')
+    armature, HAND = armature_BODY(mapping, key='HANDS')
     hand_pose = data('hand_pose').value[Slice]
     rotate = data('global_orient').value[Slice]
 
@@ -54,4 +54,4 @@ def wilor(
         base_frame=base_frame, is_left=is_left)
     hand_pose, HAND = wrist_hand(wrist_rotate, hand_pose, BODY, HAND, is_left=is_left)
     with bpy_action(armature, name) as action:
-        pose_apply(armature=armature, action=action, pose=hand_pose, bones=HAND, frame=data.begin + 1, **kwargs)
+        return pose_apply(armature=armature, action=action, pose=hand_pose, bones=HAND, frame=data.begin + 1, **kwargs)

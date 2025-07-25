@@ -2,13 +2,11 @@
 lib.py is a share lib that not rely on bpy module
 """
 import os
-import bpy
 import sys
 import importlib
 import numpy as np
 from time import time
 from collections import UserDict
-from contextlib import contextmanager
 from .logger import Log
 from types import ModuleType
 from typing import Dict, Sequence, Literal, TypeVar, get_args
@@ -21,7 +19,6 @@ TYPE_MAPPING_KEYS = Literal['BONES', 'BODY', 'HANDS', 'HEAD']
 TYPE_RUN = Literal['gvhmr', 'wilor']
 T = TypeVar('T')
 TN = np.ndarray
-MOTION_DATA = None
 TYPE_PROP = Literal['body_pose', 'hand_pose', 'global_orient', 'betas', 'transl', 'bbox']
 PROP_KEY = get_args(TYPE_PROP)
 def get_major(L: Sequence[T]) -> T | None: return max(L, key=L.count) if L else None
@@ -48,14 +45,14 @@ def warn_or_return_first(L: list[T]) -> T:
 
 def format_sec(seconds: float):
     if seconds == INF:
-        return '∞'
+        return '⏳'
     seconds = int(seconds)
     m, s = divmod(seconds, 60)
     return f"{s}s" if m == 0 else f"{m}:{s}"
 
 
-class Progress:
-    selves: dict['Progress', int] = {}
+class Progress():
+    selves: list['Progress'] = []
     update_interval = 0.5
     @property
     def _dur_change(self): return time() - self._tick_change
@@ -63,6 +60,8 @@ class Progress:
     def time(self): return time() - self.tick_start
     @property
     def active_time(self): return self._dur_run if self.pause else self._dur_run + self._dur_change
+    @property
+    def len(self): return self.Range.stop - self.Range.start
     @property
     def done(self): return self._current - self.Range.start
     @property
@@ -73,24 +72,32 @@ class Progress:
     def eta(self): return (self.Range.stop - self._current) / self.rate if self.rate != 0 else INF
     @property
     def out_range(self): return self._current < self.Range.start or self._current >= self.Range.stop
-    def status(self): return f'{self.percent:.2%},{format_sec(self.eta)},{self.rate:.1f}{self.unit}/s'
+    def status(self): return f'{self.percent:.1%},{format_sec(self.eta)},{self.rate:.1f}{self.unit}/s'
 
     @classmethod
-    def TIME(cls): return sum(s.time for s in cls.selves.keys())
+    def TIME(cls): return sum(s.time for s in cls.selves)
     @classmethod
-    def ACTIVE_TIME(cls): return sum(s.active_time for s in cls.selves.keys())
+    def ACTIVE_TIME(cls): return sum(s.active_time for s in cls.selves)
     @classmethod
-    def LEN(cls): return sum(cls.selves.values())
+    def LEN(cls): return sum(s.len for s in cls.selves)
     @classmethod
-    def DONE(cls): return sum(s.done for s in cls.selves.keys())
+    def DONE(cls): return sum(s.done for s in cls.selves)
     @classmethod
     def PERCENT(cls): return cls.DONE() / cls.LEN() if cls.LEN() != 0 else INF
     @classmethod
     def RATE(cls): return cls.DONE() / cls.ACTIVE_TIME() if cls.ACTIVE_TIME() != 0 else INF
     @classmethod
-    def ETA(cls): return sum(s.eta for s in cls.selves.keys()) / cls.LEN() if cls.LEN() != 0 else INF
+    def ETA(cls): return sum(s.eta for s in cls.selves)
     @classmethod
-    def STATUS(cls): return f'{cls.PERCENT():.2%},{format_sec(cls.ETA())},{cls.RATE():.1f}/s' if cls.LEN() > 0 else ''
+    def STATUS(cls): return f'{cls.PERCENT():.1%},{format_sec(cls.ETA())},{cls.RATE():.1f}/s' if cls.LEN() > 0 else ''
+
+    @classmethod
+    def PAUSE(cls, set: bool | None = None):
+        if set is None:
+            return any(s.pause for s in cls.selves)
+        for s in cls.selves:
+            s.pause = set
+        return set
 
     @property
     def current(self): return self._current
@@ -107,15 +114,14 @@ class Progress:
         self._tick_change = time()
 
     def __init__(self, *Range: int, unit: str = 'frame', msg='', pause=False):
-        self.Range = range(*Range)
+        self.Range = range(*Range) if Range else range(100)
         self.msg = msg
-        self.len = self.Range.stop - self.Range.start
         self.unit = unit
         self._current = self.Range.start
         self.tick_start = self.tick_update = self._tick_change = time()
         self._dur_run = 0
         self._pause = pause
-        self.__class__.selves.update({self: self.len})
+        self.__class__.selves.append(self)
 
     def update(self, step: int | None = None, set: int | None = None):
         """
@@ -123,8 +129,8 @@ class Progress:
             step: step to increase, if None, use `self.step`
             set: Any value between min and max as set in Range=...
         """
-        if self.pause:
-            self.__class__.selves.pop(self, None)
+        if self.out_range:
+            self.__class__.selves.remove(self) if self in self.__class__.selves else None
             return self._current
         if set is not None:
             self._current = set
@@ -152,56 +158,6 @@ def Mod(Dir='mapping'):
         mod = importlib.import_module(f'.{Dir}.{p}', package=__package__)
         mods[p] = mod
     return mods
-
-
-def items_mapping(self=None, context=None):
-    items: list[tuple[str, str, str]] = [(
-        'auto', 'Auto',
-        'Auto detect armature type, based on name (will enhanced in later version)')]
-    for k, m in Map().items():
-        help = ''
-        try:
-            help = m.HELP[bpy.app.translations.locale]
-        except Exception:
-            Log.warning(f'No help for {k}')
-            help = m.__doc__ if m.__doc__ else ''
-        items.append((k, k, help))
-    return items
-
-
-def items_motions(self=None, context=None):
-    """TODO: this func will trigger when redraw, so frequently"""
-    all = ['all', 'All', 'len={}. All motion data belows']
-    items: list[tuple[str, str, str]] = []    # type: ignore
-    if MOTION_DATA is None:
-        load_data()
-    if MOTION_DATA is not None:
-        keys: dict[str, list] = {}
-        for k in MOTION_DATA.keys():
-            try:
-                _k = k.split(';')
-                key = ';'.join(_k[1:4])  # mapping;run;start
-                _customKeys = ';'.join(_k[4:])
-                if key not in keys:
-                    keys[key] = [_customKeys]
-                else:
-                    keys[key].append(_customKeys)
-            except IndexError:
-                keys[k] = [k + '(indexError)']
-        for k, L in keys.items():
-            items.append((k, k, f'len={len(L)}: {L}'))
-        all[-1] = all[-1].format(len(keys))  # type: ignore
-        items.insert(0, tuple(all))  # type: ignore
-    return items
-
-
-def load_data(self=None, context=None):
-    """load motion data when npz file path changed"""
-    global MOTION_DATA
-    if MOTION_DATA is not None:
-        del MOTION_DATA
-    file = bpy.context.scene.mocap_importer.input_file   # type: ignore
-    MOTION_DATA = MotionData(npz=file)
 
 
 class MotionData(UserDict):
@@ -412,21 +368,6 @@ def get_mapping(mapping: TYPE_MAPPING | None = None, armature=None):
     if mapping is None:
         raise ValueError(f'Unknown mapping: {mapping}, try to select/add new mapping to')
     return mapping
-
-
-def get_motion_data(who):
-    '''access global var'''
-    if MOTION_DATA is None:
-        raise ValueError('Failed to load motion data')
-    data = MOTION_DATA(mapping='smplx', who=who)
-    return data
-
-
-def apply(who: str | int, mapping: TYPE_MAPPING | None, **kwargs):
-    data = get_motion_data(who)
-    for r in data.runs:
-        run = getattr(Run()[r], r)
-        run(data, mapping=mapping, **kwargs)
 
 
 def quat(xyz: TN) -> TN:

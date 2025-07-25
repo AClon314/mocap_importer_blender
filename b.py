@@ -5,11 +5,12 @@ import os
 import re
 import bpy
 import numpy as np
-from .lib import DIR_MAPPING, MAPPING_TEMPLATE, TYPE_MAPPING, TYPE_MAPPING_KEYS, TYPE_RUN, Log, Map, MotionData, bone_to_dict, euler, get_major, get_mapping, get_motion_data, get_similar, keys_BFS, quat, quat_rotAxis
+from .lib import DIR_MAPPING, MAPPING_TEMPLATE, TYPE_MAPPING, TYPE_MAPPING_KEYS, TYPE_RUN, Log, Map, Run, MotionData, Progress, bone_to_dict, euler, get_major, get_mapping, get_similar, keys_BFS, quat, quat_rotAxis
 from time import time
 from numbers import Number
+from itertools import chain
 from contextlib import contextmanager
-from typing import Literal, Sequence, get_args
+from typing import Generator, Iterable, Literal, Sequence, get_args
 try:
     from mathutils import Matrix, Vector, Quaternion, Euler
 except ImportError as e:
@@ -21,6 +22,79 @@ TYPE_I18N = Literal[  # blender 4.3.2
     'de_DE', 'it_IT', 'ka', 'ko_KR', 'pt_BR', 'pt_PT', 'ru_RU', 'sw', 'ta', 'tr_TR', 'uk_UA', 'zh_HANT',
     'ab', 'ar_EG', 'be', 'bg_BG', 'cs_CZ', 'da', 'el_GR', 'eo', 'eu_EU', 'fa_IR', 'fi_FI', 'ha', 'he_IL', 'hi_IN', 'hr_HR', 'hu_HU', 'id_ID', 'km', 'ky_KG', 'lt', 'ne_NP', 'nl_NL', 'pl_PL', 'ro_RO', 'sl', 'sr_RS', 'sr_RS@latin', 'sv_SE', 'th_TH'
 ]
+MOTION_DATA = None
+GENS: chain | None = None
+
+
+def items_mapping(self=None, context=None):
+    items: list[tuple[str, str, str]] = [(
+        'auto', 'Auto',
+        'Auto detect armature type, based on name (will enhanced in later version)')]
+    for k, m in Map().items():
+        help = ''
+        try:
+            help = m.HELP[bpy.app.translations.locale]
+        except Exception:
+            Log.warning(f'No help for {k}')
+            help = m.__doc__ if m.__doc__ else ''
+        items.append((k, k, help))
+    return items
+
+
+def apply(who: str | int, mapping: TYPE_MAPPING | None, **kwargs):
+    global GENS
+    gens: list[Iterable] = [GENS] if GENS else []
+    data = get_motion_data(who)
+    for r in data.runs:
+        run = getattr(Run()[r], r)
+        gen: Generator = run(data, mapping=mapping, **kwargs)
+        gens.append(gen)
+    GENS = chain(*gens)
+    Log.debug(f'apply {GENS=}')
+    return GENS
+
+
+def get_motion_data(who):
+    '''access global var'''
+    if MOTION_DATA is None:
+        raise ValueError('Failed to load motion data')
+    data = MOTION_DATA(mapping='smplx', who=who)
+    return data
+
+
+def items_motions(self=None, context=None):
+    """TODO: this func will trigger when redraw, so frequently"""
+    all = ['all', 'All', 'len={}. All motion data belows']
+    items: list[tuple[str, str, str]] = []    # type: ignore
+    if MOTION_DATA is None:
+        load_data()
+    if MOTION_DATA is not None:
+        keys: dict[str, list] = {}
+        for k in MOTION_DATA.keys():
+            try:
+                _k = k.split(';')
+                key = ';'.join(_k[1:4])  # mapping;run;start
+                _customKeys = ';'.join(_k[4:])
+                if key not in keys:
+                    keys[key] = [_customKeys]
+                else:
+                    keys[key].append(_customKeys)
+            except IndexError:
+                keys[k] = [k + '(indexError)']
+        for k, L in keys.items():
+            items.append((k, k, f'len={len(L)}: {L}'))
+        all[-1] = all[-1].format(len(keys))  # type: ignore
+        items.insert(0, tuple(all))  # type: ignore
+    return items
+
+
+def load_data(self=None, context=None):
+    """load motion data when npz file path changed"""
+    global MOTION_DATA
+    if MOTION_DATA is not None:
+        del MOTION_DATA
+    file = bpy.context.scene.mocap_importer.input_file   # type: ignore
+    MOTION_DATA = MotionData(npz=file)
 
 
 def get_bone_global_rotation(
@@ -89,15 +163,16 @@ def get_bones_global_rotation(
     rot_arr = np.zeros((len(frames), total_bones, 4 if rot_mode == 'QUATERNION' else 3))
 
     # 导出数据
-    with progress_mouse(len(frames)) as update:
-        for fr_i, frame in enumerate(frames):
-            bpy.context.scene.frame_set(frame)
-            for bone_i, bone_name in enumerate(bone_names):
-                rot = get_bone_global_rotation(armature, bone_name)
-                rot = rot.to_quaternion() if rot_mode == 'QUATERNION' else rot.to_euler(rot_mode)
-                rot = np.array(rot)
-                rot_arr[fr_i, bone_i] = rot
-            update()
+    pg = Progress(len(frames))
+    # with progress_mouse(len(frames)) as update:
+    for fr_i, frame in enumerate(frames):
+        bpy.context.scene.frame_set(frame)
+        for bone_i, bone_name in enumerate(bone_names):
+            rot = get_bone_global_rotation(armature, bone_name)
+            rot = rot.to_quaternion() if rot_mode == 'QUATERNION' else rot.to_euler(rot_mode)
+            rot = np.array(rot)
+            rot_arr[fr_i, bone_i] = rot
+        pg.update()
 
     return rot_arr
 
@@ -207,10 +282,14 @@ def add_keyframes(
                 keyframe = fcurve.keyframe_points.insert(frame + F, value=vectors[F][C])   # type: ignore
                 keyframe.interpolation = interpolation  # type: ignore
                 update() if F % channels == 0 else None
+                if F % channels == 0:
+                    yield
         else:
             keyframe = fcurve.keyframe_points.insert(frame, value=vectors[C])
             keyframe.interpolation = interpolation  # type: ignore
             update() if C % channels == 0 else None
+            if C % channels:
+                yield
         # Log.debug(f'is_multi={is_multi}, channels={channels}, shape={vectors.shape}', stack_info=False)
 
         if group and (not fcurve.group or fcurve.group.name != group):
@@ -543,7 +622,7 @@ BONES_TREE = {tree}"""
     return S
 
 
-def init_0(data: MotionData, Slice: slice, run: TYPE_RUN):
+def data_Slice_name_transl_rotate(data: MotionData, Slice: slice, run: TYPE_RUN):
     data = data(mapping=data.mapping, run=run)  # type: ignore
     name = ';'.join([data.who, data.run])
     Slice = get_slice(data, Slice)
@@ -557,150 +636,10 @@ def init_0(data: MotionData, Slice: slice, run: TYPE_RUN):
     return data, Slice, name, transl, rotate
 
 
-def init_1(mapping: TYPE_MAPPING | None = None, key: TYPE_MAPPING_KEYS = 'BONES'):
+def armature_BODY(mapping: TYPE_MAPPING | None = None, key: TYPE_MAPPING_KEYS = 'BONES'):
     armature = get_armatures()[0]
     BODY = get_bones(armature, key=key, mapping=mapping)
     return armature, BODY
-
-
-def bbox(
-    who: str,
-    video: str | None = None,
-    Slice: slice | None = None,
-    **kwargs,
-):
-    """
-    Args:
-        who (str): 数据标识符
-        video (str): 视频文件路径
-        Slice (slice): 帧范围切片
-        frame (int): 开始帧数
-
-    Returns:
-        bpy.types.Object: 生成的bbox物体
-    """
-    # get motion data
-    _data = get_motion_data(who)('bbox')
-    if Slice:
-        _data = _data[Slice]
-    # shape: (总帧数, 4)，格式：[x, y, X, Y]（xy=左上，XY=右下）
-    data = _data.value
-    total_frames = data.shape[0]
-
-    if (video_plane := bpy.context.active_object) and video_plane.type == 'MESH' and video_plane.name.startswith('video:'):
-        _w, _h = get_video_plain_wh(video_plane)
-        if not (_w and _h):
-            raise ValueError(f"视频平面 {video_plane.name} 没有找到视频宽高信息，请检查视频材质。")
-    else:
-        video_plane, _w, _h = add_video_plain(who, video, **kwargs)
-    ratio = _h / _w  # 视频宽高比（高/宽）
-
-    # 创建bbox平面（尺寸1x1，后续通过缩放匹配实际大小）
-    HEIGHT = 0.01
-    bpy.ops.mesh.primitive_plane_add(size=1, align='WORLD', location=(0, 0, HEIGHT))  # Z轴偏移避免遮挡
-    bbox_obj = bpy.context.active_object
-    if not bbox_obj:
-        raise RuntimeError("Failed to create bbox object")
-    bbox_obj.select_set(False)
-    bbox_obj.name = f"bbox:{who}"
-    bbox_obj.show_name = True
-    bbox_obj.display_type = 'BOUNDS'  # 仅显示边界框
-    bbox_obj.parent = video_plane
-
-    # 预计算所有帧的位置和缩放数据
-    locations = np.zeros((total_frames, 3))
-    scales = np.zeros((total_frames, 3))
-    for frame_idx in range(total_frames):
-        x, y, X, Y = data[frame_idx]
-        # 像素坐标转归一化坐标（视频宽高范围[0, video_w]和[0, video_h]）
-        norm_x = x / _w          # X轴归一化（0~1）
-        norm_y = 1 - (y / _h)    # Y轴反转（图像Y向下→3D Y向上）
-        norm_X = X / _w
-        norm_Y = 1 - (Y / _h)
-
-        # 计算bbox中心坐标（在视频平面内）
-        center_x = (norm_x + norm_X) / 2 - 0.5  # 转换为[-0.5, 0.5]范围（视频平面宽度1）
-        center_y = ((norm_y + norm_Y) / 2 - 0.5) * ratio  # 先转换为[-0.5, 0.5]，再缩放到[-ratio/2, ratio/2]
-
-        # 计算bbox缩放比例（相对于视频平面）
-        scale_x = (norm_X - norm_x)   # 宽度占视频宽度的比例
-        scale_y = (norm_Y - norm_y) * ratio   # 高度占视频高度的比例（已适配宽高比）
-
-        # 存储位置和缩放数据
-        locations[frame_idx] = [center_x, center_y, HEIGHT]
-        scales[frame_idx] = [scale_x, scale_y, 1]
-
-    with bpy_action(bbox_obj, name=f"bbox:{who}", nla_push=False) as action:
-        add_keyframes(action, locations, _data.begin + 1, "location", "Object Transforms")
-        add_keyframes(action, scales, _data.begin + 1, "scale", "Object Transforms")
-    video_plane.select_set(True)
-    bpy.context.view_layer.objects.active = video_plane
-    return bbox_obj
-
-
-def get_video_plain_wh(video_plane):
-    _w, _h = None, None
-    if video_plane.data.materials:
-        material = video_plane.data.materials[0]
-        if material and material.use_nodes:
-            for node in material.node_tree.nodes:
-                if node.type == 'TEX_IMAGE' and node.image:
-                    if node.image.source == 'MOVIE':
-                        _w, _h = node.image.size
-                        break
-    return _w, _h
-
-
-def add_video_plain(who, video, **kwargs):
-    if not video and (npz := kwargs.get('npz', None)):
-        file = str(npz).rstrip('.mocap.npz')
-        Dir, filename = os.path.split(file)
-        # 在Dir下查找以filename.***的文件
-        for f in os.listdir(Dir):
-            if f.startswith(filename):
-                video = os.path.join(Dir, f)
-                break
-    if not (video and os.path.exists(video)):
-        raise FileNotFoundError(f"视频文件不存在：{video}")
-    # 获取视频宽高
-    img = bpy.data.images.load(video)
-    img.source = 'MOVIE'
-    _w, _h = img.size
-    video_frames = img.frame_duration
-    del img
-
-    # 创建平面并调整尺寸（宽度1，高度=宽高比）
-    bpy.ops.mesh.primitive_plane_add(size=1, align='WORLD', location=(0, 0, 0))
-    video_plane = bpy.context.active_object
-    if not video_plane:
-        raise RuntimeError("Failed to create video plane object")
-    video_plane.name = f"video:{os.path.basename(video)}"
-    video_plane.scale = (1, _h / _w, 1)  # 调整高度保持宽高比
-    bpy.ops.object.transform_apply(scale=True)  # 应用缩放
-
-    # 创建视频材质（使用 principled BSDF 节点）
-    video_mat = bpy.data.materials.new(name=f"video:{who}")
-    video_mat.use_nodes = True
-    nodes = video_mat.node_tree.nodes  # type:ignore
-    links = video_mat.node_tree.links  # type:ignore
-
-    # 清除默认节点并添加视频纹理
-    for node in nodes:
-        nodes.remove(node)
-    tex_node = nodes.new('ShaderNodeTexImage')
-    tex_node.image = bpy.data.images.load(video)  # type:ignore
-    tex_node.image.source = 'MOVIE'  # type:ignore
-    tex_node.image_user.frame_duration = video_frames  # type:ignore
-    tex_node.image_user.use_auto_refresh = True  # 自动刷新视频帧 # type:ignore
-    tex_node.image_user.use_cyclic = True  # 循环播放 # type:ignore
-
-    # 连接材质节点
-    bsdf_node = nodes.new('ShaderNodeBsdfPrincipled')
-    output_node = nodes.new('ShaderNodeOutputMaterial')
-    links.new(tex_node.outputs['Color'], bsdf_node.inputs['Base Color'])
-    links.new(bsdf_node.outputs['BSDF'], output_node.inputs['Surface'])
-    video_plane.data.materials.append(video_mat)  # type:ignore
-    return video_plane, int(_w), int(_h)
 
 
 def decimate(
@@ -815,16 +754,16 @@ def pose_apply(
         if transl_base is not None:
             transl = transl - transl_base
             add_keyframes(action, transl_base, frame, f'location', 'Object Transforms')
-        add_keyframes(action, transl, frame, f'pose.bones["{bones[0]}"].location', bones[0])
+        yield from add_keyframes(action, transl, frame, f'pose.bones["{bones[0]}"].location', bones[0])
 
     bones = bones[1:] if bones[0] == 'root' else bones  # Skip root!
-    with progress_mouse(len(bones) * len(rots)) as update:
-        for i, B in enumerate(bones):
-            add_keyframes(action, rots[:, i], frame, path.format(B), B, update=update)
+    pg = Progress(len(bones) * len(rots))
+    # with progress_mouse(len(bones) * len(rots)) as update:
+    for i, B in enumerate(bones):
+        yield from add_keyframes(action, rots[:, i], frame, path.format(B), B, update=pg.update)
 
     decimate(action, bones, clean_th, decimate_th, rots, keep_end)
     pose_reset(action, bones, rot)
-    return action
 
 
 def transform_apply(
@@ -837,7 +776,8 @@ def transform_apply(
     rot = obj.rotation_mode
     path = 'rotation_quaternion' if rot == 'QUATERNION' else 'rotation_euler'
     if transl is not None:
-        add_keyframes(action, transl, frame, 'location', 'Object Transforms')
+        yield from add_keyframes(action, transl, frame, 'location', 'Object Transforms')
     if rotate is not None:
-        with progress_mouse(len(rotate)) as update:
-            add_keyframes(action, rotate, frame, path, 'Object Transforms', update=update)
+        pg = Progress(len(rotate))
+        # with progress_mouse(len(rotate)) as update:
+        yield from add_keyframes(action, rotate, frame, path, 'Object Transforms', update=pg.update)

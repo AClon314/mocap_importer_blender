@@ -1,5 +1,6 @@
+import bpy
 from ..lib import *
-from ..b import init_0, init_1, pose_apply, bpy_action, transform_apply
+from ..b import *
 
 
 def gvhmr(
@@ -21,7 +22,7 @@ def gvhmr(
     gvhmr(data('smplx', 'gvhmr', person=0))
     ```
     """
-    data, Slice, name, transl, rotate = init_0(data, Slice, run='gvhmr')
+    data, Slice, name, transl, rotate = data_Slice_name_transl_rotate(data, Slice, run='gvhmr')
     if transl is not None:
         kw = dict(transl_base=transl[base_frame])
     else:
@@ -30,12 +31,11 @@ def gvhmr(
     if not body_pose:
         obj = bpy.context.selected_objects[0]
         with bpy_action(obj, name) as action:
-            transform_apply(obj=obj, action=action, rotate=rotate, transl=transl)
-        return
+            return transform_apply(obj=obj, action=action, rotate=rotate, transl=transl)
 
-    armature, BODY = init_1(mapping, key='BODY')
+    armature, BODY = armature_BODY(mapping, key='BODY')
     rotate = rotate.reshape(-1, 1, rotate.shape[-1])
     pose = body_pose.value[Slice]
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3 or 4)
     with bpy_action(armature, name) as action:
-        pose_apply(armature=armature, action=action, pose=pose, transl=transl, bones=BODY, frame=data.begin + 1, **kw, **kwargs)
+        return pose_apply(armature=armature, action=action, pose=pose, transl=transl, bones=BODY, frame=data.begin + 1, **kw, **kwargs)
