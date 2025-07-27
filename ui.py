@@ -13,7 +13,6 @@ BL_SPACE = 'VIEW_3D'
 BL_REGION = 'UI'
 BL_CONTEXT = 'objectmode'
 TIMER: bpy.types.Timer | None = None
-TIMER_OP: 'TimerOperator|None' = None
 def Props(context: bpy.types.Context) -> 'Mocap_PropsGroup': return context.scene.mocap_importer   # type: ignore
 def Layout(self: 'bpy.types.Panel') -> 'bpy.types.UILayout': return self.layout
 def Eval(self, context): return eval(self.debug_eval)
@@ -167,25 +166,22 @@ class TimerOperator(bpy.types.Operator):
 
     @execute
     def execute(self, context):
-        global TIMER, TIMER_OP
-        if TIMER or TIMER_OP:
-            Log.warning(f'Timer already running:\n{id(TIMER)=} {id(TIMER_OP)=}')
+        global TIMER
+        if TIMER:
+            Log.warning(f'Timer already running:\n{id(TIMER)=}')
             return {'FINISHED'}
         wm = context.window_manager
         TIMER = wm.event_timer_add(Progress.update_interval, window=context.window)
-        TIMER_OP = self
         wm.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
-    def cancel(self, context):
-        global TIMER, TIMER_OP
+    def cancel(self: 'TimerOperator|None' = None, context=None):
+        global TIMER
         Log.debug(f'cancel {id(TIMER)=} {len(GEN.queue)=} {len(Progress.selves)=}')
         if TIMER:
             context.window_manager.event_timer_remove(TIMER)
             TIMER = None
             GEN.queue.clear()
-        if TIMER_OP:
-            TIMER_OP = None
         Progress.selves.clear()
         GEN.clear()
         return {'CANCELLED'}
@@ -217,7 +213,7 @@ class CancelOperator(bpy.types.Operator):
     bl_description = "取消"
 
     def execute(self, context):
-        TIMER_OP.cancel(context) if TIMER_OP else None
+        TimerOperator.cancel(context=context)
         return {'FINISHED'}
 
 
@@ -384,7 +380,7 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         name='Decimate',
         description='How much the new decimated curve is allowed to deviate from the original',
         subtype='FACTOR',
-        default=0.01,
+        default=0,  # 0.01
         max=1,
         soft_min=0,
         soft_max=0.05,

@@ -27,6 +27,7 @@ MOTION_DATA = _MOTIONDATA
 
 
 def apply(*who: str, mapping: TYPE_MAPPING | None = None, **kwargs):
+    Log.debug(f'apply {locals()=}')
     whos, mapping = props_filter(who, mapping)
     for w in whos:
         data = MOTION_DATA(who=w)
@@ -69,7 +70,7 @@ def items_motions(self=None, context=None):
                 # Log.debug(f'{tag=}')
                 tags[tag] = [TAG]
                 ranges[tag] = get_range(list_k)
-                k_tag[k] = tag
+                k_tag[f'{list_k[0]};{tag}'] = tag
             else:
                 tags[tag].append(TAG)
         except Exception as e:
@@ -616,6 +617,7 @@ def get_bones(
 
 
 def get_slice(data: MotionData, Slice: slice):
+    Log.debug(f'{data.keys()=}')
     if Slice.stop is None:
         Len = len(data('global_orient').value)   # TODO: 使用专有信息 npz['meatadata'](dtype=object) as dict
         t = list(Slice.indices(Len))
@@ -681,6 +683,7 @@ def decimate(
     '''
     Would raise AttributeError if can't find GRAPH_EDITOR area.
     '''
+    Log.debug(f'{locals()=}')
     if clean_th <= 0 and decimate_th <= 0:
         return
     # TODO: FK转IK，旋转→位置，平滑动画
@@ -747,8 +750,8 @@ def pose_apply(
     transl: 'np.ndarray | None' = None,
     transl_base: 'np.ndarray | None' = None,
     frame=1,
-    clean_th=0.002,
-    decimate_th=0.005,
+    clean_th=0.0,
+    decimate_th=0.0,
     keep_end=False,
     **kwargs
 ):
