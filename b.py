@@ -49,10 +49,36 @@ def props_filter(who: Sequence[str], mapping=None):
         whos = list(who)
     return whos, mapping
 
-# @cache
+
+@cache
+def items_motions(self=None, context=None):
+    Log.debug('items_motions')
+    all = ['all', 'All', 'len={}. All motion data belows']
+    items: list[tuple[str, str, str]] = []
+    if not MOTION_DATA:
+        load_data()
+    keys: dict[str, list] = {}
+    for k in MOTION_DATA.keys():
+        try:
+            _k = k.split(';')
+            key = ';'.join(_k[1:4])  # mapping;run;start
+            _customKeys = ';'.join(_k[4:])
+            if key not in keys:
+                keys[key] = [_customKeys]
+            else:
+                keys[key].append(_customKeys)
+        except IndexError:
+            keys[k] = [k + '(indexError)']
+    for k, L in keys.items():
+        items.append((k, k, f'len={len(L)}: {L}'))
+    all[-1] = all[-1].format(len(keys))
+    items.insert(0, tuple(all))  # type: ignore
+    return items
 
 
+@cache
 def items_mapping(self=None, context=None):
+    Log.debug('items_mapping')
     items: list[tuple[str, str, str]] = [(
         'auto', 'Auto',
         'Auto detect armature type, based on name (will enhanced in later version)')]
@@ -65,33 +91,6 @@ def items_mapping(self=None, context=None):
             help = m.__doc__ if m.__doc__ else ''
         items.append((k, k, help))
     return items
-# @cache
-
-
-def items_motions(self=None, context=None):
-    """TODO: this func will trigger when redraw, so frequently"""
-    all = ['all', 'All', 'len={}. All motion data belows']
-    items: list[tuple[str, str, str]] = []
-    # if not MOTION_DATA:
-    #     load_data()
-    if MOTION_DATA:
-        keys: dict[str, list] = {}
-        for k in MOTION_DATA.keys():
-            try:
-                _k = k.split(';')
-                key = ';'.join(_k[1:4])  # mapping;run;start
-                _customKeys = ';'.join(_k[4:])
-                if key not in keys:
-                    keys[key] = [_customKeys]
-                else:
-                    keys[key].append(_customKeys)
-            except IndexError:
-                keys[k] = [k + '(indexError)']
-        for k, L in keys.items():
-            items.append((k, k, f'len={len(L)}: {L}'))
-        all[-1] = all[-1].format(len(keys))
-        items.insert(0, tuple(all))  # type: ignore
-    return items
 
 
 def load_data(self=None, context=None):
@@ -101,6 +100,7 @@ def load_data(self=None, context=None):
     if os.path.exists(file) and file != MOTION_DATA.npz:
         del MOTION_DATA
         MOTION_DATA = MotionData(npz=file)
+        items_motions.cache_clear()
 
 
 def get_bone_global_rotation(

@@ -1,6 +1,5 @@
 # object,mesh,scene,wm,render,anim,material,texture,light,armature,curve,text,node,image,view3d,ed
 """bind to blender logic."""
-from time import time
 import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 from .b import add_mapping, load_data, items_motions, items_mapping, get_bones_info, apply
@@ -119,6 +118,7 @@ class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
 class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
     bl_label = 'Development'
     bl_parent_id = BL_ID
+    state = 0
 
     def draw(self, context):
         layout = Layout(self)
@@ -133,6 +133,22 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
         col.prop(props, 'debug_kwargs', text='')
         # col.prop(props, 'debug_eval', icon='CONSOLE', text='')
 
+        cls = self.__class__
+        if cls.state < 1:
+            cls.state += 1
+        if cls.state <= 0:
+            Log.setLevel(10)
+            cls.state = 1
+
+    @classmethod
+    def poll(cls, context):
+        if cls.state >= -1:
+            cls.state -= 1
+        if cls.state == -1:
+            Log.setLevel(20)
+        # Log.debug(f'{cls.state=}')
+        return True
+
 
 class TimerOperator(bpy.types.Operator):
     bl_idname = "mocap.start_timer"
@@ -142,7 +158,6 @@ class TimerOperator(bpy.types.Operator):
     def modal(self, context, event):
         if event.type == 'ESC' or event.type == 'PAUSE':
             Progress.PAUSE(True)
-            return {'CANCELLED'}
         if event.type == 'TIMER':
             ret = gen_calc()
             if ret:
@@ -278,6 +293,7 @@ class OpenMapping_Operator(bpy.types.Operator):
     def execute(self, context):
         # TODO: when no file manager opened, this may freeze or popop with DEFAULT style in linux
         bpy.ops.wm.path_open(filepath=DIR_MAPPING)
+        items_mapping.cache_clear()
         return {'FINISHED'}
 
 
@@ -294,6 +310,7 @@ class AddMapping_Operator(bpy.types.Operator):
         except FileExistsError:
             bpy.ops.wm.open_dir_mapping()   # type: ignore
             raise
+        items_mapping.cache_clear()
         return {'FINISHED'}
 
 
@@ -329,7 +346,8 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
     motions: bpy.props.EnumProperty(
         name='Action',
         description='load which motion action',
-        items=items_motions,
+        items=lambda self, context: items_motions(self, context),
+        # options={'ENUM_FLAG'}
     )  # type: ignore
     keep_end: bpy.props.BoolProperty(
         name='End Frame',
@@ -339,7 +357,7 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
     mapping: bpy.props.EnumProperty(
         name='Mapping',
         description='re-mapping to which bones struct',
-        items=items_mapping,
+        items=lambda self, context: items_mapping(self, context),
     )  # type: ignore
     base_frame: bpy.props.IntProperty(
         name='Frame',
