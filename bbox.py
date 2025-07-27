@@ -1,49 +1,33 @@
+import numpy as np
+from . import b
 from .b import *
+from .lib import copy_args, GEN
+HEIGHT = 0.01
 
 
-def bbox(
+def add_bbox(
     who: str,
     video: str | None = None,
-    Slice: slice | None = None,
     **kwargs,
 ):
     """
     Args:
         who (str): 数据标识符
         video (str): 视频文件路径
-        Slice (slice): 帧范围切片
         frame (int): 开始帧数
-
-    Returns:
-        bpy.types.Object: 生成的bbox物体
     """
-    # get motion data
-    _data = get_motion_data(who)('bbox')
-    if Slice:
-        _data = _data[Slice]
+    _data = b.MOTION_DATA('bbox', mapping='smplx', who=who)
+    if not _data:
+        return
+    Log.debug(f'{who=} {_data.keys()=}')
     # shape: (总帧数, 4)，格式：[x, y, X, Y]（xy=左上，XY=右下）
     data = _data.value
     total_frames = data.shape[0]
 
-    if (video_plane := bpy.context.active_object) and video_plane.type == 'MESH' and video_plane.name.startswith('video:'):
-        _w, _h = get_video_plain_wh(video_plane)
-        if not (_w and _h):
-            raise ValueError(f"视频平面 {video_plane.name} 没有找到视频宽高信息，请检查视频材质。")
-    else:
-        video_plane, _w, _h = add_video_plain(who, video, **kwargs)
-    ratio = _h / _w  # 视频宽高比（高/宽）
+    video_plane, _w, _h = get_or_add_video_plane(who, video, _data.npz)
+    ratio = _h / _w
 
-    # 创建bbox平面（尺寸1x1，后续通过缩放匹配实际大小）
-    HEIGHT = 0.01
-    bpy.ops.mesh.primitive_plane_add(size=1, align='WORLD', location=(0, 0, HEIGHT))  # Z轴偏移避免遮挡
-    bbox_obj = bpy.context.active_object
-    if not bbox_obj:
-        raise RuntimeError("Failed to create bbox object")
-    bbox_obj.select_set(False)
-    bbox_obj.name = f"bbox:{who}"
-    bbox_obj.show_name = True
-    bbox_obj.display_type = 'BOUNDS'  # 仅显示边界框
-    bbox_obj.parent = video_plane
+    bbox_obj = add_bbox_plane(who, video_plane)
 
     # 预计算所有帧的位置和缩放数据
     locations = np.zeros((total_frames, 3))
@@ -67,30 +51,62 @@ def bbox(
         # 存储位置和缩放数据
         locations[frame_idx] = [center_x, center_y, HEIGHT]
         scales[frame_idx] = [scale_x, scale_y, 1]
-        yield
 
+    start = 0 if _data.Slice.start is None else _data.Slice.start
+    pg = Progress(total_frames * 2)
     with bpy_action(bbox_obj, name=f"bbox:{who}", nla_push=False) as action:
-        yield from add_keyframes(action, locations, _data.begin + 1, "location", "Object Transforms")
-        yield from add_keyframes(action, scales, _data.begin + 1, "scale", "Object Transforms")
+        yield from add_keyframes(action, locations, start + 1, "location", "Object Transforms", update=pg.update)
+        yield from add_keyframes(action, scales, start + 1, "scale", "Object Transforms", update=pg.update)
     video_plane.select_set(True)
     bpy.context.view_layer.objects.active = video_plane
 
 
-def get_video_plain_wh(video_plane):
-    _w, _h = None, None
-    if video_plane.data.materials:
-        material = video_plane.data.materials[0]
-        if material and material.use_nodes:
-            for node in material.node_tree.nodes:
-                if node.type == 'TEX_IMAGE' and node.image:
-                    if node.image.source == 'MOVIE':
-                        _w, _h = node.image.size
-                        break
+@copy_args(add_bbox)
+def bbox(*who: str, **kwargs):
+    whos, _ = props_filter(who=who)
+    for w in whos:
+        GEN.append(add_bbox(w, **kwargs))
+
+
+def add_bbox_plane(who: str, video_plane: bpy.types.Object):
+    '''create bbox **mesh** plane, size 1m x 1m. Use re-size animation to match actual size later.'''
+    bpy.ops.mesh.primitive_plane_add(size=1, align='WORLD', location=(0, 0, HEIGHT))  # Z轴偏移避免遮挡
+    bbox_obj = bpy.context.active_object
+    if not bbox_obj:
+        raise RuntimeError("Failed to create bbox object")
+    bbox_obj.select_set(False)
+    bbox_obj.name = f"bbox:{who}"
+    bbox_obj.show_name = True
+    bbox_obj.display_type = 'BOUNDS'  # 仅显示边界框
+    bbox_obj.parent = video_plane
+    return bbox_obj
+
+
+def get_or_add_video_plane(who: str, video: str | None, npz: str | None = None):
+    if (video_plane := bpy.context.active_object) and video_plane.type == 'MESH' and video_plane.name.startswith('video:'):
+        _w, _h = get_wh_by_node(video_plane)
+    else:
+        video_plane, _w, _h = add_video_plane(who, video, npz=npz)
+    return video_plane, _w, _h
+
+
+def get_wh_by_node(video_plane: bpy.types.Object) -> tuple[int, int]:
+    _w, _h = 0, 0
+    data = video_plane.data
+    if not isinstance(data, bpy.types.Mesh):
+        raise TypeError(f"Expected a Mesh object, got {type(data)}")
+    material = data.materials[0]
+    if material and material.node_tree:
+        for node in material.node_tree.nodes:
+            if node.type == 'TEX_IMAGE' and node.image:
+                if node.image.source == 'MOVIE':
+                    _w, _h = node.image.size
+                    break
     return _w, _h
 
 
-def add_video_plain(who, video, **kwargs):
-    if not video and (npz := kwargs.get('npz', None)):
+def add_video_plane(who: str, video: str | None = None, npz: str | None = None):
+    if npz and not video:
         file = str(npz).rstrip('.mocap.npz')
         Dir, filename = os.path.split(file)
         # 在Dir下查找以filename.***的文件
@@ -100,12 +116,8 @@ def add_video_plain(who, video, **kwargs):
                 break
     if not (video and os.path.exists(video)):
         raise FileNotFoundError(f"视频文件不存在：{video}")
-    # 获取视频宽高
-    img = bpy.data.images.load(video)
-    img.source = 'MOVIE'
-    _w, _h = img.size
-    video_frames = img.frame_duration
-    del img
+
+    _w, _h, video_frames = get_wh_by_load(video)
 
     # 创建平面并调整尺寸（宽度1，高度=宽高比）
     bpy.ops.mesh.primitive_plane_add(size=1, align='WORLD', location=(0, 0, 0))
@@ -139,3 +151,12 @@ def add_video_plain(who, video, **kwargs):
     links.new(bsdf_node.outputs['BSDF'], output_node.inputs['Surface'])
     video_plane.data.materials.append(video_mat)  # type:ignore
     return video_plane, int(_w), int(_h)
+
+
+def get_wh_by_load(video: str):
+    img = bpy.data.images.load(video)
+    img.source = 'MOVIE'
+    _w, _h = img.size
+    video_frames = img.frame_duration
+    del img
+    return _w, _h, video_frames

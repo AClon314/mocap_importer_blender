@@ -31,7 +31,7 @@ def wilor(
 
     Args:
         data (MotionData, dict): mocap data
-        Range (tuple, optional): Frames range. Defaults to (0, Max_frames).
+        Slice (tuple, optional): Frames range. Defaults to (0, Max_frames).
 
     Example:
     ```python

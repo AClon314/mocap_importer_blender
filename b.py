@@ -1,16 +1,16 @@
 '''
 b.py means a share lib of bpy
 '''
+from functools import cache
 import os
 import re
 import bpy
 import numpy as np
-from .lib import DIR_MAPPING, MAPPING_TEMPLATE, TYPE_MAPPING, TYPE_MAPPING_KEYS, TYPE_RUN, Log, Map, Run, MotionData, Progress, bone_to_dict, euler, get_major, get_mapping, get_similar, keys_BFS, quat, quat_rotAxis
+from .lib import DIR_MAPPING, GEN, MAPPING_TEMPLATE, TYPE_MAPPING, TYPE_MAPPING_KEYS, TYPE_RUN, Log, Map, Run, MotionData, Progress, bone_to_dict, euler, get_major, get_mapping, get_similar, keys_BFS, quat, quat_rotAxis
 from time import time
 from numbers import Number
-from itertools import chain
 from contextlib import contextmanager
-from typing import Generator, Iterable, Literal, Sequence, get_args
+from typing import Callable, Generator, Literal, Sequence, get_args
 try:
     from mathutils import Matrix, Vector, Quaternion, Euler
 except ImportError as e:
@@ -22,8 +22,34 @@ TYPE_I18N = Literal[  # blender 4.3.2
     'de_DE', 'it_IT', 'ka', 'ko_KR', 'pt_BR', 'pt_PT', 'ru_RU', 'sw', 'ta', 'tr_TR', 'uk_UA', 'zh_HANT',
     'ab', 'ar_EG', 'be', 'bg_BG', 'cs_CZ', 'da', 'el_GR', 'eo', 'eu_EU', 'fa_IR', 'fi_FI', 'ha', 'he_IL', 'hi_IN', 'hr_HR', 'hu_HU', 'id_ID', 'km', 'ky_KG', 'lt', 'ne_NP', 'nl_NL', 'pl_PL', 'ro_RO', 'sl', 'sr_RS', 'sr_RS@latin', 'sv_SE', 'th_TH'
 ]
-MOTION_DATA = None
-GENS: chain | None = None
+_MOTIONDATA = MotionData()
+MOTION_DATA = _MOTIONDATA
+
+
+def apply(*who: str, mapping: TYPE_MAPPING | None = None, **kwargs):
+    whos, mapping = props_filter(who, mapping)
+    for w in whos:
+        data = MOTION_DATA(who=w)
+        for r in data.runs:
+            run = getattr(Run()[r], r)
+            gen: Generator = run(data, mapping=mapping, **kwargs)
+            GEN.append(gen)
+    Log.debug(f'apply {len(GEN.queue)=} {GEN=}')
+
+
+def props_filter(who: Sequence[str], mapping=None):
+    '''filter from ui.py, for lib.py'''
+    if mapping == 'Auto detect':
+        mapping = None
+    if len(who) == 1 and who[0] == 'all':
+        whos = [m[0] for m in items_motions()]
+        whos.remove('all')  # remove 'all' option
+        whos = [m for m in whos if 'cam@' not in m]
+    else:
+        whos = list(who)
+    return whos, mapping
+
+# @cache
 
 
 def items_mapping(self=None, context=None):
@@ -39,36 +65,16 @@ def items_mapping(self=None, context=None):
             help = m.__doc__ if m.__doc__ else ''
         items.append((k, k, help))
     return items
-
-
-def apply(who: str | int, mapping: TYPE_MAPPING | None, **kwargs):
-    global GENS
-    gens: list[Iterable] = [GENS] if GENS else []
-    data = get_motion_data(who)
-    for r in data.runs:
-        run = getattr(Run()[r], r)
-        gen: Generator = run(data, mapping=mapping, **kwargs)
-        gens.append(gen)
-    GENS = chain(*gens)
-    Log.debug(f'apply {GENS=}')
-    return GENS
-
-
-def get_motion_data(who):
-    '''access global var'''
-    if MOTION_DATA is None:
-        raise ValueError('Failed to load motion data')
-    data = MOTION_DATA(mapping='smplx', who=who)
-    return data
+# @cache
 
 
 def items_motions(self=None, context=None):
     """TODO: this func will trigger when redraw, so frequently"""
     all = ['all', 'All', 'len={}. All motion data belows']
-    items: list[tuple[str, str, str]] = []    # type: ignore
-    if MOTION_DATA is None:
-        load_data()
-    if MOTION_DATA is not None:
+    items: list[tuple[str, str, str]] = []
+    # if not MOTION_DATA:
+    #     load_data()
+    if MOTION_DATA:
         keys: dict[str, list] = {}
         for k in MOTION_DATA.keys():
             try:
@@ -83,7 +89,7 @@ def items_motions(self=None, context=None):
                 keys[k] = [k + '(indexError)']
         for k, L in keys.items():
             items.append((k, k, f'len={len(L)}: {L}'))
-        all[-1] = all[-1].format(len(keys))  # type: ignore
+        all[-1] = all[-1].format(len(keys))
         items.insert(0, tuple(all))  # type: ignore
     return items
 
@@ -91,10 +97,10 @@ def items_motions(self=None, context=None):
 def load_data(self=None, context=None):
     """load motion data when npz file path changed"""
     global MOTION_DATA
-    if MOTION_DATA is not None:
-        del MOTION_DATA
     file = bpy.context.scene.mocap_importer.input_file   # type: ignore
-    MOTION_DATA = MotionData(npz=file)
+    if os.path.exists(file) and file != MOTION_DATA.npz:
+        del MOTION_DATA
+        MOTION_DATA = MotionData(npz=file)
 
 
 def get_bone_global_rotation(
@@ -411,7 +417,6 @@ def progress_mouse(*Range: float, is_percent=True):
         is_percent: if True, convert Range into 0\\~10000 for **‱**
         Range: if Range is None and is_percent == True, fallback to 0\\~10000
         if len(Range) != 3 and is_percent == True, show **‱**, auto set step for 10 thousandths
-        Mod: reduce UI update. if Mod == 0, will auto decide Mod number.
     """
     MAX = 10000
     wm: 'bpy.types.WindowManager' = bpy.context.window_manager  # type: ignore
@@ -750,14 +755,15 @@ def pose_apply(
         rots = euler(pose)
         path = 'pose.bones["{}"].rotation_euler'
 
+    pg = Progress(len(bones) * len(rots))
     if transl is not None:
         if transl_base is not None:
             transl = transl - transl_base
             add_keyframes(action, transl_base, frame, f'location', 'Object Transforms')
-        yield from add_keyframes(action, transl, frame, f'pose.bones["{bones[0]}"].location', bones[0])
+        pg_t = Progress(len(transl))
+        yield from add_keyframes(action, transl, frame, f'pose.bones["{bones[0]}"].location', bones[0], update=pg_t.update)
 
     bones = bones[1:] if bones[0] == 'root' else bones  # Skip root!
-    pg = Progress(len(bones) * len(rots))
     # with progress_mouse(len(bones) * len(rots)) as update:
     for i, B in enumerate(bones):
         yield from add_keyframes(action, rots[:, i], frame, path.format(B), B, update=pg.update)
@@ -775,9 +781,11 @@ def transform_apply(
 ):
     rot = obj.rotation_mode
     path = 'rotation_quaternion' if rot == 'QUATERNION' else 'rotation_euler'
-    if transl is not None:
-        yield from add_keyframes(action, transl, frame, 'location', 'Object Transforms')
     if rotate is not None:
-        pg = Progress(len(rotate))
+        pg_r = Progress(len(rotate))
+    if transl is not None:
+        pg_t = Progress(len(transl))
+        yield from add_keyframes(action, transl, frame, 'location', 'Object Transforms', update=pg_t.update)
+    if rotate is not None:
         # with progress_mouse(len(rotate)) as update:
-        yield from add_keyframes(action, rotate, frame, path, 'Object Transforms', update=pg.update)
+        yield from add_keyframes(action, rotate, frame, path, 'Object Transforms', update=pg_r.update)

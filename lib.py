@@ -4,27 +4,39 @@ lib.py is a share lib that not rely on bpy module
 import os
 import sys
 import importlib
+import itertools
 import numpy as np
 from time import time
 from collections import UserDict
+from functools import cache
 from .logger import Log
 from types import ModuleType
-from typing import Dict, Sequence, Literal, TypeVar, get_args
+from typing import Any, Callable, Dict, Generator, Iterable, ParamSpec, Sequence, Literal, TypeVar, cast, get_args
 INF = float('inf')
+BATCH_SIZE = 1
 DIR_SELF = os.path.dirname(__file__)
 DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
 MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
 TYPE_MAPPING = Literal['smpl', 'smplx']
 TYPE_MAPPING_KEYS = Literal['BONES', 'BODY', 'HANDS', 'HEAD']
 TYPE_RUN = Literal['gvhmr', 'wilor']
-T = TypeVar('T')
-TN = np.ndarray
+_PS = ParamSpec("_PS")
+_TV = TypeVar("_TV")
 TYPE_PROP = Literal['body_pose', 'hand_pose', 'global_orient', 'betas', 'transl', 'bbox']
 PROP_KEY = get_args(TYPE_PROP)
-def get_major(L: Sequence[T]) -> T | None: return max(L, key=L.count) if L else None
+def get_major(L: Sequence[_TV]) -> _TV | None: return max(L, key=L.count) if L else None
 def Map(Dir='mapping') -> Dict[TYPE_MAPPING | str, ModuleType]: return Mod(Dir=Dir)
 def Run(Dir='run') -> Dict[TYPE_RUN | str, ModuleType]: return Mod(Dir=Dir)
 def Axis(is_torch=False): return 'dim' if is_torch else 'axis'
+
+
+def copy_args(
+    func: Callable[_PS, Any]
+) -> Callable[[Callable[..., _TV]], Callable[_PS, _TV]]:
+    """Decorator does nothing but returning the casted original function"""
+    def return_func(func: Callable[..., _TV]) -> Callable[_PS, _TV]:
+        return cast(Callable[_PS, _TV], func)
+    return return_func
 
 
 def in_or_skip(part, full, pattern=''):
@@ -35,11 +47,11 @@ def in_or_skip(part, full, pattern=''):
     return (not part) or (not full) or (part in full)
 
 
-def warn_or_return_first(L: list[T]) -> T:
+def warn_or_return_first(L: list[_TV]) -> _TV:
     """used in class `MotionData`"""
     Len = len(L)
     if Len > 1:
-        Log.warning(f'{Len} > 1', extra={'report': False}, stack_info=True)
+        Log.warning(f'{Len} > 1', extra={'report': True, 'mouse': False})
     return L[0]
 
 
@@ -49,6 +61,69 @@ def format_sec(seconds: float):
     seconds = int(seconds)
     m, s = divmod(seconds, 60)
     return f"{s}s" if m == 0 else f"{m}:{s}"
+
+
+@cache
+def Mod(Dir='mapping'):
+    files = os.listdir(os.path.join(DIR_SELF, Dir))
+    pys = []
+    mods: Dict[str, ModuleType] = {}
+    for f in files:
+        if f.endswith('.py') and f not in ['template.py', '__init__.py']:
+            pys.append(f[:-3])
+    for p in pys:
+        mod = importlib.import_module(f'.{Dir}.{p}', package=__package__)
+        mods[p] = mod
+    return mods
+
+
+def gen_calc():
+    '''
+    Intensive computing tasks that can be paused. return True when tasks finished.
+    '''
+    if Progress.PAUSE():
+        return
+    global BATCH_SIZE
+    tick_prev = time()
+    while True:
+        Log.debug(f'gen_calc {len(Progress.selves)=} {len(GEN.queue)=} {BATCH_SIZE=}')
+        try:
+            for _ in range(BATCH_SIZE):
+                next(GEN.chain)
+        except StopIteration:
+            return True
+        now = time()
+        delta = now - tick_prev - Progress.update_interval
+        tick_prev = now
+        if delta < Progress.update_interval // 2:
+            BATCH_SIZE *= 2
+        elif delta > Progress.update_interval:
+            BATCH_SIZE = max(1, BATCH_SIZE // 2)
+        else:
+            break
+
+
+class Generators:
+    queue: list[Iterable] = []
+    cache = None
+    def debug(self): Log.debug(f'Gens: {len(self.queue)=}\t{self.__dict__=}')
+    def insert(self, at=0, *gen: Generator): self.queue[at:at] = gen; self.cache = None
+    def append(self, *gen: Generator): self.queue.extend(gen); self.cache = None
+    def pop(self, at=-1): self.queue.pop(at); self.cache = None
+    def remove(self, *gen: Iterable): [self.queue.remove(g) for g in gen]; self.cache = None
+    def clear(self): self.queue.clear(); self.cache = None
+
+    @property
+    def chain(self):
+        if self.cache:
+            return self.cache
+        self.cache = itertools.chain(*self.queue)
+        self.queue = [self.cache]
+        self.debug()
+        return self.cache
+
+
+GEN = Generators()
 
 
 class Progress():
@@ -72,7 +147,7 @@ class Progress():
     def eta(self): return (self.Range.stop - self._current) / self.rate if self.rate != 0 else INF
     @property
     def out_range(self): return self._current < self.Range.start or self._current >= self.Range.stop
-    def status(self): return f'{self.percent:.1%},{format_sec(self.eta)},{self.rate:.1f}{self.unit}/s'
+    def status(self): return f'{self.percent:.0%},{format_sec(self.eta)},{self.rate:.1f}{self.unit}/s'
 
     @classmethod
     def TIME(cls): return sum(s.time for s in cls.selves)
@@ -89,7 +164,7 @@ class Progress():
     @classmethod
     def ETA(cls): return sum(s.eta for s in cls.selves)
     @classmethod
-    def STATUS(cls): return f'{cls.PERCENT():.1%},{format_sec(cls.ETA())},{cls.RATE():.1f}/s' if cls.LEN() > 0 else ''
+    def STATUS(cls): return f'{cls.PERCENT():.0%},{format_sec(cls.ETA())},{cls.RATE():.0f}/s' if cls.LEN() > 0 else ''
 
     @classmethod
     def PAUSE(cls, set: bool | None = None):
@@ -139,25 +214,12 @@ class Progress():
         else:
             self._current += step
         now = time()
-        if now - self.tick_update >= self.update_interval:
-            # wm.progress_update(self.current)
-            self.tick_update = now
+        # if now - self.tick_update >= self.update_interval:
+        #     # wm.progress_update(self.current)
+        #     self.tick_update = now
         if self._current >= self.Range.stop:
             self.pause = True
         return self._current
-
-
-def Mod(Dir='mapping'):
-    files = os.listdir(os.path.join(DIR_SELF, Dir))
-    pys = []
-    mods: Dict[str, ModuleType] = {}
-    for f in files:
-        if f.endswith('.py') and f not in ['template.py', '__init__.py']:
-            pys.append(f[:-3])
-    for p in pys:
-        mod = importlib.import_module(f'.{Dir}.{p}', package=__package__)
-        mods[p] = mod
-    return mods
 
 
 class MotionData(UserDict):
@@ -169,13 +231,11 @@ class MotionData(UserDict):
     ```
     """
 
-    def keys(self) -> list[str]:
-        return list(super().keys())
+    def keys(self) -> list[str]: return list(super().keys())
+    def values(self) -> list[np.ndarray]: return list(super().values())
+    def __bool__(self): return bool(self.keys())
 
-    def values(self) -> list[np.ndarray]:
-        return list(super().values())
-
-    def __init__(self, /, *args, npz: str | os.PathLike | None = None, lazy=False, **kwargs):
+    def __init__(self, /, *args, npz: str | None = None, lazy=False, **kwargs):
         """
         Inherit from dict
         Args:
@@ -183,27 +243,27 @@ class MotionData(UserDict):
             lazy (bool, optional): if True, do NOT load npz file.
         """
         super().__init__(*args, **kwargs)
-        if npz:
-            self.npz = npz
-            if not lazy:
-                self.update(np.load(npz, allow_pickle=True))
+        self.Slice = slice(None)
+        self.npz = npz
+        if not lazy and npz and os.path.exists(npz):
+            self.update(np.load(npz, allow_pickle=True))
 
     def __call__(
         self,
-        *prop: TYPE_PROP | Literal['global', 'incam'],
+        *prop: TYPE_PROP,
         mapping: TYPE_MAPPING | None = None,
         run: TYPE_RUN | None = None,
         who: str | int | None = None,
-        Range=lambda frame: 0 < frame < np.inf,
-        # coord: Optional[Literal['global', 'incam']] = None,
+        Slice: slice | None = None,
     ):
         # Log.debug(f'self.__dict__={self.__dict__}')
         MD = MotionData(npz=self.npz, lazy=True)
         if isinstance(who, int):
             who = f'person{who}'
+        if Slice:
+            self.Slice = Slice
 
         for k, v in self.items():
-            # TODO: Range (int)
             is_in = [in_or_skip(args, k, ';{};') for args in [mapping, run, who, *prop]]
             is_in = all(is_in)
             if is_in:
@@ -259,7 +319,7 @@ class MotionData(UserDict):
         ```python
         return self.values()[0]
         ```"""
-        return warn_or_return_first(self.values())
+        return warn_or_return_first(self.values())[self.Slice]
 
     @property
     def keyname(self):
@@ -370,7 +430,7 @@ def get_mapping(mapping: TYPE_MAPPING | None = None, armature=None):
     return mapping
 
 
-def quat(xyz: TN) -> TN:
+def quat(xyz: np.ndarray) -> np.ndarray:
     """euler to quat
     Args:
         arr (TN): 输入张量/数组，shape为(...,3)，对应[roll, pitch, yaw]（弧度）
@@ -408,7 +468,7 @@ def quat(xyz: TN) -> TN:
     return _quat
 
 
-def euler(wxyz: TN) -> TN:
+def euler(wxyz: np.ndarray) -> np.ndarray:
     """union quat to euler
     Args:
         quat (TN): [w,x,y,z], shape==(...,4)
@@ -476,7 +536,7 @@ def Lib(arr, mod1: ModuleType | str = np, mod2: ModuleType | str = 'torch', ret_
     return mod
 
 
-def Norm(arr: TN, dim: int = -1, keepdim: bool = True) -> TN:
+def Norm(arr: np.ndarray, dim: int = -1, keepdim: bool = True) -> np.ndarray:
     """计算范数，支持批量输入"""
     lib = Lib(arr)
     is_torch = lib.__name__ == 'torch'
@@ -486,7 +546,7 @@ def Norm(arr: TN, dim: int = -1, keepdim: bool = True) -> TN:
         return lib.linalg.norm(arr, axis=dim, keepdims=keepdim)
 
 
-def skew_symmetric(v: TN) -> TN:
+def skew_symmetric(v: np.ndarray) -> np.ndarray:
     """生成反对称矩阵，支持批量输入"""
     lib = Lib(v)
     is_torch = lib.__name__ == 'torch'
@@ -504,7 +564,7 @@ def skew_symmetric(v: TN) -> TN:
         return lib.stack([row0, row1, row2], axis=-2)  # (...,3,3)
 
 
-def Rodrigues(rot_vec3: TN) -> TN:
+def Rodrigues(rot_vec3: np.ndarray) -> np.ndarray:
     """
     支持批量处理的罗德里格斯公式
 
@@ -563,7 +623,7 @@ def Rodrigues(rot_vec3: TN) -> TN:
     return ret
 
 
-def rotMat_to_quat(R: TN) -> TN:
+def rotMat_to_quat(R: np.ndarray) -> np.ndarray:
     """将3x3旋转矩阵转换为单位四元数 [w, x, y, z]，支持批量和PyTorch/NumPy"""
     if R.shape[-1] == 4:
         return R
@@ -636,7 +696,7 @@ def rotMat_to_quat(R: TN) -> TN:
     return ret
 
 
-def quat_rotAxis(arr: TN) -> TN: return rotMat_to_quat(Rodrigues(arr))
+def quat_rotAxis(arr: np.ndarray) -> np.ndarray: return rotMat_to_quat(Rodrigues(arr))
 
 
 def quat_to_rotMat(quats):
@@ -688,7 +748,7 @@ def euler_to_rotMat(eulers):
     return R.reshape(*original_shape[:-1], 3, 3)  # (..., 3, 3)
 
 
-def rotMat(arr: TN):
+def rotMat(arr: np.ndarray):
     """quat/euler to rotation matrix"""
     if arr.shape[-1] == 4:
         return quat_to_rotMat(arr)

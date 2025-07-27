@@ -1,10 +1,11 @@
 # object,mesh,scene,wm,render,anim,material,texture,light,armature,curve,text,node,image,view3d,ed
 """bind to blender logic."""
+from time import time
 import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
-from . import b
+from .b import add_mapping, load_data, items_motions, items_mapping, get_bones_info, apply
 from .logger import _PKG_
-from .lib import DIR_MAPPING, Progress, Log
+from .lib import DIR_MAPPING, Progress, GEN, gen_calc, Log
 from .bbox import bbox
 VIDEO_EXT = "webm,mkv,flv,flv,vob,vob,ogv,ogg,drc,gifv,webm,gifv,mng,avi,mov,qt,wmv,yuv,rm,rmvb,viv,asf,amv,mp4,m4p,m4v,mpg,mp2,mpeg,mpe,mpv,mpg,mpeg,m2v,m4v,svi,3gp,3g2,mxf,roq,nsv,flv,f4v,f4p,f4a,f4b".split(',')
 BL_ID = 'MOCAP_PT_Panel'
@@ -12,7 +13,7 @@ BL_CATAGORY = 'Animation'
 BL_SPACE = 'VIEW_3D'
 BL_REGION = 'UI'
 BL_CONTEXT = 'objectmode'
-TIMER: 'bpy.types.Timer|None' = None
+TIMER: bpy.types.Timer | None = None
 TIMER_OP: 'TimerOperator|None' = None
 def Props(context: bpy.types.Context) -> 'Mocap_PropsGroup': return context.scene.mocap_importer   # type: ignore
 def Layout(self: 'bpy.types.Panel') -> 'bpy.types.UILayout': return self.layout
@@ -27,7 +28,6 @@ def execute(func):
     def wrap(self, context):
         setattr(Log, 'report', self.report)
         ret = func(self, context)
-        delattr(Log, 'report') if hasattr(Log, 'report') else Log.warning(f'No `report` attr {Log=}')
         return ret
     return wrap
 
@@ -53,6 +53,7 @@ class MAIN_PT_Panel(ExpandedPanel, bpy.types.Panel):
     def draw_header(self, context):
         layout = Layout(self)
         row = layout.row(align=True)
+        row.label(icon='OUTLINER_OB_ARMATURE', text=self._bl_label if Progress.LEN() == 0 else '')
         if Progress.LEN() > 0:
             row.progress(factor=Progress.PERCENT(), type='RING')
             if Progress.PAUSE():
@@ -61,7 +62,6 @@ class MAIN_PT_Panel(ExpandedPanel, bpy.types.Panel):
                 row.operator('mocap.pause', icon='PAUSE', text='')
             row.operator('mocap.cancel', icon='CANCEL', text='')
             row.label(text=Progress.STATUS())
-        row.label(icon='OUTLINER_OB_ARMATURE', text=self._bl_label)
 
 
 class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
@@ -140,20 +140,14 @@ class TimerOperator(bpy.types.Operator):
     bl_description = "Setup timer for Progress"
 
     def modal(self, context, event):
-        if event.type == 'ESC':
-            return self.cancel(context)
-        if event.type == 'PAUSE':
+        if event.type == 'ESC' or event.type == 'PAUSE':
             Progress.PAUSE(True)
             return {'CANCELLED'}
         if event.type == 'TIMER':
-            Log.debug(f'Timer {b.GENS=} {len(Progress.selves)=}')
-            if not Progress.PAUSE() and b.GENS:
-                for i in range(500):
-                    try:
-                        next(b.GENS)
-                    except StopIteration:
-                        self.cancel(context)
-                        return {'FINISHED'}
+            ret = gen_calc()
+            if ret:
+                self.cancel(context)
+                return {'FINISHED'}
         return {'PASS_THROUGH'}
 
     @execute
@@ -163,7 +157,6 @@ class TimerOperator(bpy.types.Operator):
             Log.warning(f'Timer already running:\n{id(TIMER)=} {id(TIMER_OP)=}')
             return {'FINISHED'}
         wm = context.window_manager
-        self.cancel(context)
         TIMER = wm.event_timer_add(Progress.update_interval, window=context.window)
         TIMER_OP = self
         wm.modal_handler_add(self)
@@ -171,12 +164,15 @@ class TimerOperator(bpy.types.Operator):
 
     def cancel(self, context):
         global TIMER, TIMER_OP
+        Log.debug(f'cancel {id(TIMER)=} {len(GEN.queue)=} {len(Progress.selves)=}')
         if TIMER:
-            Log.debug(f'Cancel {id(TIMER)=}')
             context.window_manager.event_timer_remove(TIMER)
             TIMER = None
+            GEN.queue.clear()
         if TIMER_OP:
             TIMER_OP = None
+        Progress.selves.clear()
+        GEN.clear()
         return {'CANCELLED'}
 
 
@@ -207,31 +203,7 @@ class CancelOperator(bpy.types.Operator):
 
     def execute(self, context):
         TIMER_OP.cancel(context) if TIMER_OP else None
-        Progress.selves.clear()
         return {'FINISHED'}
-
-
-def all_or_one(context, func=b.apply):
-    props = Props(context)
-    mapping = None if props.mapping == 'Auto detect' else props.mapping
-    _kw = {k: v for k, v in props.items()}
-    _kw_debug = eval(f'dict({props.debug_kwargs})')
-    kw = dict(mapping=mapping, npz=props.input_file, **_kw_debug, **_kw)
-    is_selected = context.selected_objects
-    bpy.ops.mocap.start_timer()  # type: ignore
-    if props.motions == 'all':
-        motions = [m[0] for m in b.items_motions()]
-        motions.remove(motions[0])  # remove 'all' option
-        motions = [m for m in motions if 'cam@' not in m]
-        for who in motions:
-            try:
-                func(who=who, **kw)
-            except Exception as e:
-                Log.error(f'Error {who}: {e}')
-            if not is_selected:
-                bpy.ops.object.select_all(action='DESELECT')
-    else:
-        func(who=props.motions, **kw)
 
 
 class ApplyMocap_Operator(bpy.types.Operator):
@@ -242,7 +214,9 @@ class ApplyMocap_Operator(bpy.types.Operator):
 
     @execute
     def execute(self, context):
-        all_or_one(context, b.apply)
+        props = Props(context)
+        apply(props.motions, mapping=props.mapping)
+        bpy.ops.mocap.start_timer()  # type: ignore
         return {'FINISHED'}
 
 
@@ -255,7 +229,9 @@ class Bbox_Operator(bpy.types.Operator):
 
     @execute
     def execute(self, context):
-        all_or_one(context, bbox)
+        props = Props(context)
+        bbox(props.motions, mapping=props.mapping)
+        bpy.ops.mocap.start_timer()  # type: ignore
         return {'FINISHED'}
 
 
@@ -288,7 +264,7 @@ class GetBonesInfo_Operator(bpy.types.Operator):
 
     @execute
     def execute(self, context):
-        s = b.get_bones_info()
+        s = get_bones_info()
         Log.info(s, extra={'mouse': False})
         return {'FINISHED'}
 
@@ -314,7 +290,7 @@ class AddMapping_Operator(bpy.types.Operator):
     @execute
     def execute(self, context):
         try:
-            b.add_mapping()
+            add_mapping()
         except FileExistsError:
             bpy.ops.wm.open_dir_mapping()   # type: ignore
             raise
@@ -348,12 +324,12 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         description=LoadFile_Operator.bl_description,
         default='mocap_*.npz',
         # subtype='FILE_PATH',
-        update=b.load_data,
+        update=load_data,
     )  # type: ignore
     motions: bpy.props.EnumProperty(
         name='Action',
         description='load which motion action',
-        items=b.items_motions,
+        items=items_motions,
     )  # type: ignore
     keep_end: bpy.props.BoolProperty(
         name='End Frame',
@@ -363,7 +339,7 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
     mapping: bpy.props.EnumProperty(
         name='Mapping',
         description='re-mapping to which bones struct',
-        items=b.items_mapping,
+        items=items_mapping,
     )  # type: ignore
     base_frame: bpy.props.IntProperty(
         name='Frame',
@@ -402,9 +378,3 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         description='kwargs for debug',
         default="rot=0",
     )   # type: ignore
-    # debug_eval: bpy.props.StringProperty(
-    #     name='Console Execute',
-    #     description='Dangerous',
-    #     default="print('😄')",
-    #     update=Eval,
-    # )   # type: ignore
