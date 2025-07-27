@@ -73,8 +73,9 @@ def items_motions(self=None, context=None):
             else:
                 tags[tag].append(TAG)
         except Exception as e:
-            tags[tag] = [k + f'({e})']
-    # Log.debug(f'{tags=}\t\t{k_tag=}\t\t{ranges=}')
+            tags[tag] = ['❌' + k]
+            Log.error(f'{locals()=}', exc_info=e, extra={'log': True})
+    Log.debug(f'{tags=}\t\t{k_tag=}\t\t{ranges=}')
     tag_k = {v: k for k, v in k_tag.items()}
     for t, TAG in tags.items():
         items.append((tag_k[t], f'{t}{ranges[t]}', f'tags={len(TAG)}: {TAG}'))
@@ -85,7 +86,10 @@ def items_motions(self=None, context=None):
 
 
 def get_range(keys: list[str]):
-    _len = len(MOTION_DATA(*keys).value)    # type: ignore
+    try:
+        _len = len(MOTION_DATA(*keys).value)    # type: ignore
+    except Exception as e:
+        return ''
     try:
         start = int(keys[3])
         _stop = f'={start + _len}' if start != 0 else ''

@@ -1,10 +1,10 @@
 from .FKtoIK import fktoikaddon
 # IS_DEBUG = bpy.context.preferences.view.show_developer_ui
 REG = [
-    # fktoikaddon.register
+    fktoikaddon.register
 ]
 UNREG = [
-    # fktoikaddon.unregister
+    fktoikaddon.unregister
 ]
 def register(): [reg() for reg in REG]
 def unregister(): [unreg() for unreg in UNREG]

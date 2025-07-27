@@ -319,7 +319,12 @@ class MotionData(UserDict):
         ```python
         return self.values()[0]
         ```"""
-        return warn_or_return_first(self.values())[self.Slice]
+        v = warn_or_return_first(self.values())
+        try:
+            return v[self.Slice]
+        except Exception as e:
+            Log.warning(e, exc_info=e)
+            return v
 
     @property
     def keyname(self):
