@@ -57,23 +57,42 @@ def items_motions(self=None, context=None):
     items: list[tuple[str, str, str]] = []
     if not MOTION_DATA:
         load_data()
-    keys: dict[str, list] = {}
+    tags: dict[str, list] = {}
+    k_tag = {}
+    ranges = {}
     for k in MOTION_DATA.keys():
         try:
-            _k = k.split(';')
-            key = ';'.join(_k[1:4])  # mapping;run;start
-            _customKeys = ';'.join(_k[4:])
-            if key not in keys:
-                keys[key] = [_customKeys]
+            list_k = k.split(';')
+            tag = ';'.join(list_k[1:4])  # mapping(gvhmr);who(person1);start(0)
+            TAG = ';'.join(list_k[4:])
+            if tag not in tags.keys():
+                # Log.debug(f'{tag=}')
+                tags[tag] = [TAG]
+                ranges[tag] = get_range(list_k)
+                k_tag[k] = tag
             else:
-                keys[key].append(_customKeys)
-        except IndexError:
-            keys[k] = [k + '(indexError)']
-    for k, L in keys.items():
-        items.append((k, k, f'len={len(L)}: {L}'))
-    all[-1] = all[-1].format(len(keys))
+                tags[tag].append(TAG)
+        except Exception as e:
+            tags[tag] = [k + f'({e})']
+    # Log.debug(f'{tags=}\t\t{k_tag=}\t\t{ranges=}')
+    tag_k = {v: k for k, v in k_tag.items()}
+    for t, TAG in tags.items():
+        items.append((tag_k[t], f'{t}{ranges[t]}', f'tags={len(TAG)}: {TAG}'))
+    items.sort(key=lambda x: f'{len(tags[k_tag[x[0]]])}{x[0]}')
+    all[-1] = all[-1].format(len(tags))
     items.insert(0, tuple(all))  # type: ignore
     return items
+
+
+def get_range(keys: list[str]):
+    _len = len(MOTION_DATA(*keys).value)    # type: ignore
+    try:
+        start = int(keys[3])
+        _stop = f'={start + _len}' if start != 0 else ''
+    except ValueError:
+        _stop = ''
+    _range = f'+{_len}{_stop}'
+    return _range
 
 
 @cache
