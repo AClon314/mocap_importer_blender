@@ -64,12 +64,13 @@ def items_motions(self=None, context=None):
     for k in MOTION_DATA.keys():
         try:
             list_k = k.split(';')
-            tag = ';'.join(list_k[1:4])  # mapping(gvhmr);who(person1);start(0)
-            TAG = ';'.join(list_k[4:])
+            _range = get_range(list_k)
+            tag = ';'.join(list_k[1:3])  # mapping(gvhmr);who(person1);start(0)
+            TAG = ';'.join(list_k[4:]) + ' ' + _range
             if tag not in tags.keys():
                 # Log.debug(f'{tag=}')
                 tags[tag] = [TAG]
-                ranges[tag] = get_range(list_k)
+                ranges[tag] = _range
                 k_tag[f'{list_k[0]};{tag}'] = tag
             else:
                 tags[tag].append(TAG)
@@ -79,7 +80,7 @@ def items_motions(self=None, context=None):
     Log.debug(f'{tags=}\t\t{k_tag=}\t\t{ranges=}')
     tag_k = {v: k for k, v in k_tag.items()}
     for t, TAG in tags.items():
-        items.append((tag_k[t], f'{t}{ranges[t]}', f'tags={len(TAG)}: {TAG}'))
+        items.append((tag_k[t], f'{t};{ranges[t]}', f'tags={len(TAG)}: {TAG}'))
     items.sort(key=lambda x: f'{len(tags[k_tag[x[0]]])}{x[0]}')
     all[-1] = all[-1].format(len(tags))
     items.insert(0, tuple(all))  # type: ignore
@@ -96,7 +97,7 @@ def get_range(keys: list[str]):
         _stop = f'={start + _len}' if start != 0 else ''
     except ValueError:
         _stop = ''
-    _range = f'+{_len}{_stop}'
+    _range = f'{start}+{_len}{_stop}'
     return _range
 
 
@@ -683,7 +684,6 @@ def decimate(
     '''
     Would raise AttributeError if can't find GRAPH_EDITOR area.
     '''
-    Log.debug(f'{locals()=}')
     if clean_th <= 0 and decimate_th <= 0:
         return
     # TODO: FK转IK，旋转→位置，平滑动画

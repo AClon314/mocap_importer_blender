@@ -323,7 +323,7 @@ class MotionData(UserDict):
         try:
             return v[self.Slice]
         except Exception as e:
-            Log.warning(e, exc_info=e)
+            # Log.warning(e, exc_info=e)
             return v
 
     @property

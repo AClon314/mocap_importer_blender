@@ -12,12 +12,12 @@ BL_CATAGORY = 'Animation'
 BL_SPACE = 'VIEW_3D'
 BL_REGION = 'UI'
 BL_CONTEXT = 'objectmode'
-TIMER: bpy.types.Timer | None = None
 def Props(context: bpy.types.Context) -> 'Mocap_PropsGroup': return context.scene.mocap_importer   # type: ignore
 def Layout(self: 'bpy.types.Panel') -> 'bpy.types.UILayout': return self.layout
 def Eval(self, context): return eval(self.debug_eval)
 def register(): bpy.types.Scene.mocap_importer = bpy.props.PointerProperty(type=Mocap_PropsGroup)   # type: ignore
 def unregister(): del bpy.types.Scene.mocap_importer    # type: ignore
+def ui_to_b_kwargs(p: 'Mocap_PropsGroup'): return dict(mapping=p.mapping, keep_end=p.keep_end, base_frame=p.base_frame, clean_th=p.clean_th, decimate_th=p.decimate_th, **eval(f'dict({p.debug_kwargs})'))
 
 
 def execute(func):
@@ -75,13 +75,14 @@ class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
         row.operator('mocap.load_file', icon='FILE_FOLDER', text='')
         col.prop(props, 'motions', icon='ACTION', text='')
         row = col.row(align=True)
-        row.operator('mocap.bbox', icon='SHADING_BBOX')
-        if context.selected_objects:
+        row.operator('mocap.bbox', icon='SHADING_BBOX') if 'cam' not in props.motions else None  # TODO: judge by tags, hidden when not include bbox
+        if 'cam' in props.motions:
+            apply_icon = 'CAMERA_DATA'
+        elif context.selected_objects:
             apply_icon = 'ARMATURE_DATA'
-            apply_text = 'Apply'
         else:
             apply_icon = 'OUTLINER_OB_ARMATURE'
-            apply_text = 'Add'
+        apply_text = 'Apply' if context.selected_objects else 'Add'
         row.operator('mocap.apply', icon=apply_icon, text=apply_text)
 
 
@@ -153,6 +154,7 @@ class TimerOperator(bpy.types.Operator):
     bl_idname = "mocap.start_timer"
     bl_label = "Timer"
     bl_description = "Setup timer for Progress"
+    timer = None
 
     def modal(self, context, event):
         if event.type == 'ESC' or event.type == 'PAUSE':
@@ -166,21 +168,19 @@ class TimerOperator(bpy.types.Operator):
 
     @execute
     def execute(self, context):
-        global TIMER
-        if TIMER:
-            Log.warning(f'Timer already running:\n{id(TIMER)=}')
+        if TimerOperator.timer:
+            Log.warning(f'Timer already running:\n{id(TimerOperator.timer)=}')
             return {'FINISHED'}
         wm = context.window_manager
-        TIMER = wm.event_timer_add(Progress.update_interval, window=context.window)
+        TimerOperator.timer = wm.event_timer_add(Progress.update_interval, window=context.window)
         wm.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
     def cancel(self: 'TimerOperator|None' = None, context=None):
-        global TIMER
-        Log.debug(f'cancel {id(TIMER)=} {len(GEN.queue)=} {len(Progress.selves)=}')
-        if TIMER:
-            context.window_manager.event_timer_remove(TIMER)
-            TIMER = None
+        Log.debug(f'cancel {id(TimerOperator.timer)=} {len(GEN.queue)=} {len(Progress.selves)=}')
+        if TimerOperator.timer:
+            context.window_manager.event_timer_remove(TimerOperator.timer)
+            TimerOperator.timer = None
             GEN.queue.clear()
         Progress.selves.clear()
         GEN.clear()
@@ -226,7 +226,7 @@ class ApplyMocap_Operator(bpy.types.Operator):
     @execute
     def execute(self, context):
         props = Props(context)
-        apply(props.motions, mapping=props.mapping)
+        apply(props.motions, **ui_to_b_kwargs(props))
         bpy.ops.mocap.start_timer()  # type: ignore
         return {'FINISHED'}
 
@@ -241,7 +241,7 @@ class Bbox_Operator(bpy.types.Operator):
     @execute
     def execute(self, context):
         props = Props(context)
-        bbox(props.motions, mapping=props.mapping)
+        bbox(props.motions, **ui_to_b_kwargs(props))
         bpy.ops.mocap.start_timer()  # type: ignore
         return {'FINISHED'}
 
