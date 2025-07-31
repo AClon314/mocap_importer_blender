@@ -1,10 +1,11 @@
 # object,mesh,scene,wm,render,anim,material,texture,light,armature,curve,text,node,image,view3d,ed
 """bind to blender logic."""
+import os
 import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
-from .b import add_mapping, load_data, items_motions, items_mapping, get_bones_info, apply
+from .b import add_mapping, decimate, load_data, items_motions, items_mapping, get_bones_info, apply, temp_override
 from .logger import _PKG_
-from .lib import DIR_MAPPING, Progress, GEN, gen_calc, Log
+from .lib import DIR_MAPPING, DIR_SELF, Progress, GEN, gen_calc, Log
 from .bbox import bbox
 VIDEO_EXT = "webm,mkv,flv,flv,vob,vob,ogv,ogg,drc,gifv,webm,gifv,mng,avi,mov,qt,wmv,yuv,rm,rmvb,viv,asf,amv,mp4,m4p,m4v,mpg,mp2,mpeg,mpe,mpv,mpg,mpeg,m2v,m4v,svi,3gp,3g2,mxf,roq,nsv,flv,f4v,f4p,f4a,f4b".split(',')
 BL_ID = 'MOCAP_PT_Panel'
@@ -12,6 +13,7 @@ BL_CATAGORY = 'Animation'
 BL_SPACE = 'VIEW_3D'
 BL_REGION = 'UI'
 BL_CONTEXT = 'objectmode'
+_EXPORT_PY = os.path.join(DIR_SELF, 'export.py')
 def Props(context: bpy.types.Context) -> 'Mocap_PropsGroup': return context.scene.mocap_importer   # type: ignore
 def Layout(self: 'bpy.types.Panel') -> 'bpy.types.UILayout': return self.layout
 def Eval(self, context): return eval(self.debug_eval)
@@ -60,6 +62,7 @@ class MAIN_PT_Panel(ExpandedPanel, bpy.types.Panel):
                 row.operator('mocap.pause', icon='PAUSE', text='')
             row.operator('mocap.cancel', icon='CANCEL', text='')
             row.label(text=Progress.STATUS())
+        row.operator('mocap.start_task_queue', icon='PLAY', text='')
 
 
 class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
@@ -84,6 +87,7 @@ class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
             apply_icon = 'OUTLINER_OB_ARMATURE'
         apply_text = 'Apply' if context.selected_objects else 'Add'
         row.operator('mocap.apply', icon=apply_icon, text=apply_text)
+        row.prop(props, 'is_import', icon='EVENT_ONEKEY', text='')
 
 
 class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
@@ -95,24 +99,41 @@ class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
         layout = Layout(self)
         props = Props(context)
         col = layout.column()
-        row = layout.row(align=True)
+
+        row = col.row(align=True)
+        row.prop(props, 'base_frame')
+
+        _col = col.column(align=True)
+        row = _col.row(align=True)
         row.prop(props, 'mapping', icon='OUTLINER_OB_ARMATURE', text='')
         row.operator('mocap.add_mapping', icon='ADD', text='')
         row.operator('wm.open_dir_mapping', icon='FILE_FOLDER', text='')
+        # _col.operator('armature.a_to_t_pose', text='A-pose to T-pose')
+        _row = _col.row(align=True)
+        _row.operator('object.fk_to_ik', icon='GROUP_BONE', text='FK to IK')
+        _row.prop(props, 'is_ik_to_fk', icon='EVENT_TWOKEY', text='')
 
-        _row = col.row(align=True)
-        _row.prop(props, 'base_frame')
-
-        row = col.row()
+        _col_ = col.column(align=True)
+        row = _col_.row()
+        _col = row.column(align=True)
         is_clean = props.clean_th > 0
         is_dec = props.decimate_th > 0
-        _row = row.row(align=True)
+        _row = _col.row(align=True)
         _row.prop(props, 'clean_th', icon='HANDLETYPE_AUTO_CLAMP_VEC')
         _row.prop(props, 'keep_end', icon='NEXT_KEYFRAME', text='')
         _row.active = is_clean
         _row = row.row()
         _row.prop(props, 'decimate_th', icon='HANDLETYPE_ALIGNED_VEC')
         _row.active = is_dec
+
+        _row = _col_.row(align=True)
+        _row.operator('anim.decimate', icon='MOD_DECIM', text='Decimate Curve')
+        _row.prop(props, 'is_decimate', icon='EVENT_THREEKEY', text='')
+        _row.active = is_dec or is_clean
+
+        # row = col.row(align=True)
+        # row.prop(props, 'post_process', text='')
+        # row.prop(props, 'is_post_process', icon='EVENT_FOURKEY', text='')
 
 
 class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
@@ -125,6 +146,7 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
         props = Props(context)
         col = layout.column()
         col.operator('armature.get_bones_info', icon='BONE_DATA')
+        # col.operator('mocap.export', icon='EXPORT', text='Export')
         row = col.row(align=True)
         row.operator('mocap.start_timer', icon='TIME')
         row.operator('mocap.pause', icon='PAUSE')
@@ -310,24 +332,37 @@ class AddMapping_Operator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class ReloadScriptOperator(bpy.types.Operator):
-    bl_idname = 'wm.reload_script'
-    bl_label = 'Reload'
-    bl_options = {'REGISTER'}
-    bl_description = 'Reload Script. 重载脚本'
+class Decimate_Operator(bpy.types.Operator):
+    bl_idname = 'anim.decimate'
+    bl_label = 'Decimate Curve'
+    bl_description = 'Decimate F-Curves by removing closely spaced keyframes'
+    bl_options = {'REGISTER', 'UNDO'}
 
     @execute
     def execute(self, context):
-        # 获取当前文本编辑器
-        for area in bpy.context.screen.areas:
-            if area.type == 'TEXT_EDITOR':
-                with bpy.context.temp_override(area=area):
-                    bpy.ops.text.resolve_conflict(resolution='RELOAD')
-                    bpy.ops.text.run_script()
-                break
-        else:
-            self.report({'ERROR'}, "没有找到文本编辑器")
+        props = Props(context)
+        action = bpy.context.active_object.animation_data.action if bpy.context.active_object and bpy.context.active_object.animation_data else None
+        if not action:
+            Log.error("No active action found")
             return {'CANCELLED'}
+        bones = get_bones_info()
+        # decimate(action=action, bones=bones, **ui_to_b_kwargs(props)) # TODO
+        return {'FINISHED'}
+
+
+class TaskQueue_Operator(bpy.types.Operator):
+    bl_idname = 'mocap.start_task_queue'
+    bl_label = 'Begin'
+    bl_description = 'Start the task queue for processing mocap data'
+    bl_translation_context = 'WindowManager'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @execute
+    def execute(self, context):
+        props = Props(context)
+        bpy.ops.mocap.apply() if props.is_import else None  # type: ignore
+        bpy.ops.object.fk_to_ik() if props.is_ik_to_fk else None    # type: ignore
+        bpy.ops.anim.decimate() if props.is_decimate else None  # type: ignore
         return {'FINISHED'}
 
 
@@ -377,7 +412,8 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         precision=3,
     )  # type: ignore
     decimate_th: bpy.props.FloatProperty(
-        name='Decimate',
+        name='Decimate (Allowed Change)',
+        translation_context='Operator',
         description='How much the new decimated curve is allowed to deviate from the original',
         subtype='FACTOR',
         default=0,  # 0.01
@@ -392,3 +428,28 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         description='kwargs for debug',
         default="rot=0",
     )   # type: ignore
+    is_import: bpy.props.BoolProperty(
+        name='①',
+        description='Enable `Import/Apply` in Task queue',
+        default=True,
+    )  # type: ignore
+    is_ik_to_fk: bpy.props.BoolProperty(
+        name='②',
+        description='Enable `IK to FK` conversion in Task queue',
+        default=True,
+    )  # type: ignore
+    is_decimate: bpy.props.BoolProperty(
+        name='③',
+        description='Enable `Decimate` in Task queue',
+        default=True,
+    )  # type: ignore
+    is_post_process: bpy.props.BoolProperty(
+        name='④',
+        description='Enable `Post Process` in Task queue',
+        default=False,
+    )  # type: ignore
+    post_process: bpy.props.StringProperty(
+        name='Post Process',
+        description='Post process after finishing Task queue',
+        default=_EXPORT_PY,
+    )  # type: ignore

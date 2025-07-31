@@ -31,11 +31,11 @@ def gvhmr(
     if not body_pose:
         obj = bpy.context.selected_objects[0]
         with bpy_action(obj, name) as action:
-            return transform_apply(obj=obj, action=action, rotate=rotate, transl=transl)
+            yield from transform_apply(obj=obj, action=action, rotate=rotate, transl=transl)
 
     armature, BODY = armature_BODY(mapping, key='BODY')
     rotate = rotate.reshape(-1, 1, rotate.shape[-1])
     pose = body_pose.value[Slice]
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3 or 4)
     with bpy_action(armature, name) as action:
-        return pose_apply(armature=armature, action=action, pose=pose, transl=transl, bones=BODY, frame=data.begin + 1, **kw, **kwargs)
+        yield from pose_apply(armature=armature, action=action, pose=pose, transl=transl, bones=BODY, frame=data.begin + 1, **kw, **kwargs)

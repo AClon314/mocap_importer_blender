@@ -105,8 +105,7 @@ def get_range(keys: list[str]):
 def items_mapping(self=None, context=None):
     Log.debug('items_mapping')
     items: list[tuple[str, str, str]] = [(
-        'auto', 'Auto',
-        'Auto detect armature type, based on name (will enhanced in later version)')]
+        'auto', 'Auto', 'Auto detect armature type, based on majority bone names.')]
     for k, m in Map().items():
         help = ''
         try:
@@ -330,6 +329,26 @@ def add_keyframes(
     return action
 
 
+def get_frame_range(action: 'bpy.types.Action'):
+    """get range from F-curves, would raise ValueError"""
+    if not action.fcurves:
+        raise ValueError("Action has no F-Curves")
+    min_frame = float('inf')
+    max_frame = float('-inf')
+
+    for fcurve in action.fcurves:
+        Log.debug(f'{fcurve.data_path=} {fcurve.array_index=} {fcurve.group=}')
+        if fcurve.keyframe_points:
+            frames = [kp.co[0] for kp in fcurve.keyframe_points]
+            min_frame = min(min_frame, min(frames))
+            max_frame = max(max_frame, max(frames))
+            Log.debug(f'{len(frames)=} {min_frame=} {max_frame=}')
+
+    if min_frame != float('inf') and max_frame != float('-inf'):
+        return (int(min_frame), int(max_frame))
+    raise ValueError("Action has no valid frame range")
+
+
 @contextmanager
 def temp_override(
     area='NLA_EDITOR',
@@ -382,7 +401,12 @@ def bpy_action(
     nla_push=True,
 ):
     """
-    Create a new action for object, at last push NLA and restore the old action after context
+    Create a new action for object, at last push NLA and restore the old action after context.  
+    Usage:```python
+    with bpy_action(obj, name='MyAction', nla_push=True) as action:
+        yield from add_keyframes(action, ...)
+        # return add_keyframes(action, ...) # ⚠️ don't do this, or it will execute the cleanup work of `will` context
+    ```
 
     TODO: Support Action Slot when blender 5.0 https://developer.blender.org/docs/release_notes/4.4/upgrading/slotted_actions/
     """
@@ -397,12 +421,11 @@ def bpy_action(
         raise ValueError('No animation data found')
     if obj.animation_data.action:
         old_action = obj.animation_data.action
-    # Log.debug(f'old_action={old_action}')
     action = obj.animation_data.action = bpy.data.actions.new(name=name)
     try:
         # Log.debug(f'action_suitable_slots={obj.animation_data.action_suitable_slots}')
-        slot = action.slots.new(id_type='OBJECT', name=name)
-        obj.animation_data.action_slot = slot
+        slot = action.slots.new(id_type='OBJECT', name=name)    # type: ignore
+        obj.animation_data.action_slot = slot   # type: ignore
     except AttributeError:
         Log.info('skip create action slot because blender < 4.4')
     if nla_push:
@@ -418,15 +441,18 @@ def bpy_action(
         strips = track.strips
         if len(strips) > 0:
             start = int(strips[-1].frame_end)
-        # Log.debug(f'start={start}, strips={strips}')
         strip = track.strips.new(name=name, start=start, action=action)
         # strip.extrapolation = 'HOLD'
         # strip.blend_type = 'REPLACE'
     yield action
     if nla_push and strip:
-        Len = action.frame_range[1]
-        strip.action_frame_end = Len
-        # strip.frame_end = start + Len
+        Log.debug(f'Pushing NLA strip')
+        # bpy.context.evaluated_depsgraph_get().update()
+        # bpy.context.scene.update_tag()
+        # bpy.context.view_layer.update()
+        end = action.frame_range[1]
+        strip.action_frame_start = start
+        strip.action_frame_end = end
     if old_action and obj and obj.animation_data and obj.animation_data.action:
         obj.animation_data.action = old_action
     else:
@@ -680,6 +706,7 @@ def decimate(
     decimate_th: float,
     rots,
     keep_end: bool = False,
+    **kwargs,
 ):
     '''
     Would raise AttributeError if can't find GRAPH_EDITOR area.
@@ -704,8 +731,7 @@ def decimate(
         for b in old_bones:
             b.bone.select = True
 
-        # exclude = [1] if keep_begin else []
-        exclude = [len(rots)] if keep_end else []
+        exclude = [len(rots)] if keep_end else []   # TODO: remove rots args
         for fcurve in action.fcurves:
             # 过滤掉非关键通道（如位置通道可能不需要处理）
             if not any(b in fcurve.data_path for b in bones):
@@ -750,9 +776,6 @@ def pose_apply(
     transl: 'np.ndarray | None' = None,
     transl_base: 'np.ndarray | None' = None,
     frame=1,
-    clean_th=0.0,
-    decimate_th=0.0,
-    keep_end=False,
     **kwargs
 ):
     """Apply to keyframes, with translation, pose, and shape to character using Action and F-Curves.
@@ -793,8 +816,6 @@ def pose_apply(
     # with progress_mouse(len(bones) * len(rots)) as update:
     for i, B in enumerate(bones):
         yield from add_keyframes(action, rots[:, i], frame, path.format(B), B, update=pg.update)
-
-    decimate(action, bones, clean_th, decimate_th, rots, keep_end)
     pose_reset(action, bones, rot)
 
 
