@@ -28,10 +28,18 @@ def gvhmr(
     else:
         kw = {}
     body_pose = data('body_pose')
-    if not body_pose:
-        obj = bpy.context.selected_objects[0]
-        with bpy_action(obj, name) as action:
-            yield from transform_apply(obj=obj, action=action, rotate=rotate, transl=transl)
+    if not body_pose:  # for cam@
+        objs = bpy.context.selected_objects
+        cam = objs[0] if objs else None
+        if not cam:
+            cam = bpy.ops.object.camera_add(location=(0, 0, 0))
+            cam = bpy.context.object
+            if not cam:
+                raise RuntimeError('No active object and failed to add camera')
+                return
+        with bpy_action(cam, name) as action:
+            yield from transform_apply(obj=cam, action=action, rotate=rotate, transl=transl)
+        return
 
     armature, BODY = armature_BODY(mapping, key='BODY')
     rotate = rotate.reshape(-1, 1, rotate.shape[-1])

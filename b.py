@@ -720,8 +720,7 @@ def decimate(
         with temp_override(area='GRAPH_EDITOR', mode='global') as context:
             ...
     except AttributeError:
-        Log.error("GRAPH_EDITOR area not found, please open a GRAPH_EDITOR area to use this function.")
-        return
+        raise RuntimeError("GRAPH_EDITOR area not found, please open a GRAPH_EDITOR area to use this function.")
     with temp_override(area='GRAPH_EDITOR', mode='global') as context:
         obj = context.active_object
         old_show = context.area.spaces[0].dopesheet.show_only_selected

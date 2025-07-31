@@ -347,8 +347,7 @@ class Decimate_Operator(bpy.types.Operator):
         props = Props(context)
         action = bpy.context.active_object.animation_data.action if bpy.context.active_object and bpy.context.active_object.animation_data else None
         if not action:
-            Log.error("No active action found")
-            return {'CANCELLED'}
+            raise RuntimeError("No active action found")
         bones = get_bones_info()
         # decimate(action=action, bones=bones, **ui_to_b_kwargs(props)) # TODO
         return {'FINISHED'}
