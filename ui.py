@@ -182,7 +182,11 @@ class TimerOperator(bpy.types.Operator):
         if event.type == 'ESC' or event.type == 'PAUSE':
             Progress.PAUSE(True)
         if event.type == 'TIMER':
-            ret = gen_calc()
+            try:
+                ret = gen_calc()
+            except Exception:
+                self.cancel(context=context)
+                raise
             if ret:
                 self.cancel(context)
                 return {'FINISHED'}
