@@ -3,10 +3,11 @@
 import os
 import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
-from .b import add_mapping, decimate, load_data, items_motions, items_mapping, get_bones_info, apply, temp_override
+from .b import gen_FKtoIK, add_mapping, decimate, gen_decimate, get_armatures, load_data, items_motions, items_mapping, get_bones_info, apply
 from .logger import _PKG_
 from .lib import DIR_MAPPING, DIR_SELF, Progress, GEN, gen_calc, Log
 from .bbox import bbox
+from .libs import fk_to_ik
 VIDEO_EXT = "webm,mkv,flv,flv,vob,vob,ogv,ogg,drc,gifv,webm,gifv,mng,avi,mov,qt,wmv,yuv,rm,rmvb,viv,asf,amv,mp4,m4p,m4v,mpg,mp2,mpeg,mpe,mpv,mpg,mpeg,m2v,m4v,svi,3gp,3g2,mxf,roq,nsv,flv,f4v,f4p,f4a,f4b".split(',')
 BL_ID = 'MOCAP_PT_Panel'
 BL_CATAGORY = 'Animation'
@@ -110,8 +111,8 @@ class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
         row.operator('wm.open_dir_mapping', icon='FILE_FOLDER', text='')
         # _col.operator('armature.a_to_t_pose', text='A-pose to T-pose')
         _row = _col.row(align=True)
-        _row.operator('object.fk_to_ik', icon='GROUP_BONE', text='FK to IK')
-        _row.prop(props, 'is_ik_to_fk', icon='EVENT_TWOKEY', text='')
+        _row.operator('mocap.fk_to_ik', icon='GROUP_BONE', text='FK to IK')
+        _row.prop(props, 'is_fk_to_ik', icon='EVENT_TWOKEY', text='')
 
         _col_ = col.column(align=True)
         row = _col_.row()
@@ -127,7 +128,7 @@ class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
         _row.active = is_dec
 
         _row = _col_.row(align=True)
-        _row.operator('anim.decimate', icon='MOD_DECIM', text='Decimate Curve')
+        _row.operator('mocap.decimate', icon='MOD_DECIM', text='Decimate Curve')
         _row.prop(props, 'is_decimate', icon='EVENT_THREEKEY', text='')
         _row.active = is_dec or is_clean
 
@@ -336,8 +337,21 @@ class AddMapping_Operator(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class FK_to_IK_Operator(bpy.types.Operator):
+    bl_idname = 'mocap.fk_to_ik'
+    bl_label = 'FK to IK'
+    bl_description = 'Append FK bones to IK'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @execute
+    def execute(self, context):
+        GEN.append(gen_FKtoIK())
+        bpy.ops.mocap.start_timer()  # type: ignore
+        return {'FINISHED'}
+
+
 class Decimate_Operator(bpy.types.Operator):
-    bl_idname = 'anim.decimate'
+    bl_idname = 'mocap.decimate'
     bl_label = 'Decimate Curve'
     bl_description = 'Decimate F-Curves by removing closely spaced keyframes'
     bl_options = {'REGISTER', 'UNDO'}
@@ -345,11 +359,7 @@ class Decimate_Operator(bpy.types.Operator):
     @execute
     def execute(self, context):
         props = Props(context)
-        action = bpy.context.active_object.animation_data.action if bpy.context.active_object and bpy.context.active_object.animation_data else None
-        if not action:
-            raise RuntimeError("No active action found")
-        bones = get_bones_info()
-        # decimate(action=action, bones=bones, **ui_to_b_kwargs(props)) # TODO
+        GEN.append(gen_decimate(**ui_to_b_kwargs(props)))
         return {'FINISHED'}
 
 
@@ -364,8 +374,8 @@ class TaskQueue_Operator(bpy.types.Operator):
     def execute(self, context):
         props = Props(context)
         bpy.ops.mocap.apply() if props.is_import else None  # type: ignore
-        bpy.ops.object.fk_to_ik() if props.is_ik_to_fk else None    # type: ignore
-        bpy.ops.anim.decimate() if props.is_decimate else None  # type: ignore
+        bpy.ops.mocap.fk_to_ik() if props.is_fk_to_ik else None    # type: ignore
+        bpy.ops.mocap.decimate() if props.is_decimate else None  # type: ignore
         return {'FINISHED'}
 
 
@@ -436,7 +446,7 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         description='Enable `Import/Apply` in Task queue',
         default=True,
     )  # type: ignore
-    is_ik_to_fk: bpy.props.BoolProperty(
+    is_fk_to_ik: bpy.props.BoolProperty(
         name='②',
         description='Enable `IK to FK` conversion in Task queue',
         default=True,

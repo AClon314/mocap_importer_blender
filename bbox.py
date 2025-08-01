@@ -5,7 +5,7 @@ from .lib import copy_args, GEN
 HEIGHT = 0.01
 
 
-def add_bbox(
+def gen_bbox(
     who: str,
     video: str | None = None,
     **kwargs,
@@ -61,11 +61,11 @@ def add_bbox(
     bpy.context.view_layer.objects.active = video_plane
 
 
-@copy_args(add_bbox)
+@copy_args(gen_bbox)
 def bbox(*who: str, **kwargs):
     whos, _ = props_filter(who=who)
     for w in whos:
-        GEN.append(add_bbox(w, **kwargs))
+        GEN.append(gen_bbox(w, **kwargs))
 
 
 def add_bbox_plane(who: str, video_plane: bpy.types.Object):

@@ -64,7 +64,7 @@ def items_motions(self=None, context=None):
     for k in MOTION_DATA.keys():
         try:
             list_k = k.split(';')
-            _range = get_range(list_k)
+            _range = get_range_from_motion(list_k)
             tag = ';'.join(list_k[1:3])  # mapping(gvhmr);who(person1);start(0)
             TAG = ';'.join(list_k[4:]) + ' ' + _range
             if tag not in tags.keys():
@@ -87,7 +87,8 @@ def items_motions(self=None, context=None):
     return items
 
 
-def get_range(keys: list[str]):
+def get_range_from_motion(keys: list[str]):
+    '''get frame range from MOTION_DATA's keys, like `gvhmr;person1;0;0;0;0`'''
     try:
         _len = len(MOTION_DATA(*keys).value)    # type: ignore
     except Exception as e:
@@ -329,20 +330,18 @@ def add_keyframes(
     return action
 
 
-def get_frame_range(action: 'bpy.types.Action'):
-    """get range from F-curves, would raise ValueError"""
+def get_range_from_action(action: 'bpy.types.Action'):
+    """get frame range from F-curves, would raise ValueError"""
     if not action.fcurves:
         raise ValueError("Action has no F-Curves")
     min_frame = float('inf')
     max_frame = float('-inf')
 
     for fcurve in action.fcurves:
-        Log.debug(f'{fcurve.data_path=} {fcurve.array_index=} {fcurve.group=}')
         if fcurve.keyframe_points:
             frames = [kp.co[0] for kp in fcurve.keyframe_points]
             min_frame = min(min_frame, min(frames))
             max_frame = max(max_frame, max(frames))
-            Log.debug(f'{len(frames)=} {min_frame=} {max_frame=}')
 
     if min_frame != float('inf') and max_frame != float('-inf'):
         return (int(min_frame), int(max_frame))
@@ -401,7 +400,7 @@ def bpy_action(
     nla_push=True,
 ):
     """
-    Create a new action for object, at last push NLA and restore the old action after context.  
+    Create a new action for object, at last push NLA and restore the old action after context.
     Usage:```python
     with bpy_action(obj, name='MyAction', nla_push=True) as action:
         yield from add_keyframes(action, ...)
@@ -699,12 +698,36 @@ def armature_BODY(mapping: TYPE_MAPPING | None = None, key: TYPE_MAPPING_KEYS = 
     return armature, BODY
 
 
+def gen_FKtoIK():
+    from .libs import fk_to_ik
+    armatures = get_armatures()
+    pg = Progress(len(armatures))
+    for arm in armatures:
+        bones = [b.name for b in arm.pose.bones if 'root' not in b.name]
+        fk_to_ik(arm.name, bones)
+        pg.update()
+        yield
+
+
+def gen_decimate(**kwargs):
+    armatures = get_armatures()
+    pg = Progress(len(armatures))
+    for arm in armatures:
+        action = arm.animation_data.action
+        if not action:
+            raise RuntimeError("No active action found")
+        bones = [b.name for b in arm.pose.bones]
+        Log.debug(f'Decimate {locals()=}')
+        decimate(action=action, bones=bones, **kwargs)
+        pg.update()
+        yield
+
+
 def decimate(
     action: 'bpy.types.Action',
     bones: Sequence[str],
     clean_th: float,
     decimate_th: float,
-    rots,
     keep_end: bool = False,
     **kwargs,
 ):
@@ -713,7 +736,6 @@ def decimate(
     '''
     if clean_th <= 0 and decimate_th <= 0:
         return
-    # TODO: FK转IK，旋转→位置，平滑动画
     # TODO: ⭐复制优化前动画，二分法调整threshold直到用户满意（方便后期手工曲线编辑）⭐
     # TODO: 增加armatures参数，未处理多骨架同时导入
     try:
@@ -730,7 +752,8 @@ def decimate(
         for b in old_bones:
             b.bone.select = True
 
-        exclude = [len(rots)] if keep_end else []   # TODO: remove rots args
+        start, end = get_range_from_action(action)
+        exclude = [end - start] if keep_end else []
         for fcurve in action.fcurves:
             # 过滤掉非关键通道（如位置通道可能不需要处理）
             if not any(b in fcurve.data_path for b in bones):
