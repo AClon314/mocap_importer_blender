@@ -1,16 +1,15 @@
 '''
 b.py means a share lib of bpy
 '''
-from functools import cache
 import os
 import re
 import bpy
 import numpy as np
-from .lib import DIR_MAPPING, GEN, MAPPING_TEMPLATE, TYPE_MAPPING, TYPE_MAPPING_KEYS, TYPE_RUN, Log, Map, Run, MotionData, Progress, bone_to_dict, euler, get_major, get_mapping, get_similar, keys_BFS, quat, quat_rotAxis
+from .lib import DIR_MAPPING, GEN, MAPPING_TEMPLATE, TYPE_MAPPING, TYPE_MAPPING_KEYS, TYPE_RUN, Log, cache, Map, Run, MotionData, Progress, bone_to_dict, euler, get_major, get_similar, in_or_skip, keys_BFS, quat, quat_rotAxis
 from time import time
 from numbers import Number
 from contextlib import contextmanager
-from typing import Callable, Generator, Literal, Sequence, get_args
+from typing import Generator, Literal, Sequence, get_args
 try:
     from mathutils import Matrix, Vector, Quaternion, Euler
 except ImportError as e:
@@ -107,6 +106,7 @@ def items_mapping(self=None, context=None):
     Log.debug('items_mapping')
     items: list[tuple[str, str, str]] = [(
         'auto', 'Auto', 'Auto detect armature type, based on majority bone names.')]
+    Map.cache_clear()
     for k, m in Map().items():
         help = ''
         try:
@@ -222,9 +222,10 @@ def get_bones_relative_rotation(
     Returns:
         numpy.ndarray: 形状为(total_frames, total_bones, 4)的四元数数组
     """
+    if not (armature and armature.animation_data and armature.animation_data.action):
+        Log.error("Action Not found")
+        return
     action = armature.animation_data.action
-    if not action:
-        raise ValueError("Action Not found")
 
     # 收集骨骼信息
     bones = {b.name: b for b in armature.pose.bones}
@@ -507,6 +508,17 @@ def progress_mouse(*Range: float, is_percent=True):
     wm.progress_end()
 
 
+def get_active_selected_objs(objs: list[bpy.types.Object] | None = None) -> list[bpy.types.Object]:
+    '''return [active, other_selected] objects'''
+    objs = bpy.context.selected_objects if objs is None else objs
+    active = bpy.context.active_object
+    if active in objs:
+        objs.remove(active)
+        return [active, *objs]
+    else:
+        return objs
+
+
 def select_armature(deselect=True, exclude_name=set()):
     """Select armatures in the scene"""
     if deselect:
@@ -519,10 +531,11 @@ def select_armature(deselect=True, exclude_name=set()):
     return armatures
 
 
-def get_armatures(armatures: 'list[bpy.types.Object] | None' = None):
+def get_armatures(*armature: bpy.types.Object):
     """if None, always get active(selected) armature"""
+    armatures = armature
     if not armatures:
-        armatures = bpy.context.selected_objects
+        armatures = get_active_selected_objs()
     if not armatures:
         if hasattr(bpy.ops.scene, 'smplx_add_gender'):
             exclude = {e.name for e in bpy.context.scene.objects}
@@ -530,53 +543,205 @@ def get_armatures(armatures: 'list[bpy.types.Object] | None' = None):
             return select_armature(exclude_name=exclude)
         else:
             raise ValueError(f'Please select an armature or install smpl-x blender addon: {e}')
-    for armature in armatures:
-        if armature.type != 'ARMATURE':
-            raise ValueError(f'Not an armature: {armature.name}')
+    armatures = [arm for arm in armatures if arm.type == 'ARMATURE']
+    not_arm = [arm.name for arm in armatures if arm.type != 'ARMATURE']
+    Log.warning(f'Not armature: {not_arm}') if not_arm else None
     return armatures
 
 
-def get_selected_bones(armature=None, context=None):
-    """if None, always get active(selected) bones"""
-    if not context:
-        context = bpy.context
-    obj = get_armatures([armature])[0]
-
-    if context.mode == 'OBJECT':
+def get_selected_bones(*armature: bpy.types.Object, fallback: Literal['all', 'visible', 'hidden', 'no'] = 'visible'):
+    """
+    Args:
+        fallback: triggerred when no bones are selected. default select visible bones.
+    """
+    is_warn = False
+    arm_bones: dict[str, list[str]] = {}
+    objs = get_armatures(*armature)
+    for obj in objs:
         data = obj.data
-        selected_bones = [bone for bone in data.bones if bone.select]
-    elif context.mode == 'POSE':
-        pose = obj.pose
-        selected_bones = [bone for bone in pose.bones if bone.bone.select]
-    else:
-        raise ValueError("Please select an armature in OBJECT or POSE mode.")
-    bones: list[str] = [bone.name for bone in selected_bones]
-    len_bones = len(bones)
-    len_smplx = len(Map()['smplx'].BODY)   # TODO: use smplx BONES
-    if len_bones != len_smplx:
-        Log.warning(f'{obj.name}: selected {len_bones}, but should be {len_smplx}')
-    return bones
+        if not isinstance(data, bpy.types.Armature):
+            continue
+        if bpy.context.mode == 'POSE':
+            pose = obj.pose
+            selected_bones = [bone for bone in pose.bones if bone.bone.select]
+        elif bpy.context.mode in ['OBJECT', 'EDIT_ARMATURE']:
+            selected_bones = [bone for bone in data.bones if bone.select]
+        bones = [bone.name for bone in selected_bones]
+        if len(bones) == 0:
+            if fallback == 'all':
+                bones = [bone.name for bone in data.bones]
+            elif fallback == 'visible':
+                bones = [bone.name for bone in data.bones if is_bone_hidden(bone, data) == False]
+            elif fallback == 'hidden':
+                bones = [bone.name for bone in data.bones if is_bone_hidden(bone, data) == True]
+            is_warn = True
+        arm_bones[obj.name] = bones
+        Log.debug(f'{data.collections=}\t{data.collections.keys()=}')
+    arm_len = {a: len(b) for a, b in arm_bones.items()}
+    Log.debug(f'selected bones: {arm_len}')
+    Log.warning('Selected some bones in EDIT/POSE mode.') if is_warn and bpy.context.mode not in ['POSE', 'EDIT_ARMATURE']else None
+    return arm_bones
+
+
+def is_bone_hidden(bone: bpy.types.Bone, armature: bpy.types.Armature):
+    """Check if a bone is hidden in the armature. armature=Object.data"""
+    if bone.hide:
+        return bone.hide
+    for layer, collect in armature.collections_all.items():
+        bones = collect.bones
+        if bone.name in bones.keys():
+            # raise ValueError(f'{collect.is_visible=}')
+            return not collect.is_visible
+    raise ValueError(f'{bone.name=} not in {armature.name=}')
 
 
 def bones_tree(armature: 'bpy.types.Object', whiteList: Sequence[str] | None = None):
     """bones to dict tree"""
-    if armature and armature.type == 'ARMATURE':
-        for bone in armature.pose.bones:
-            if not bone.parent:
-                return {bone.name: bone_to_dict(bone, whiteList)}
-    return {}
+    if not (armature and armature.type == 'ARMATURE'):
+        return {}
+    root_bones = {}
+    for bone in armature.pose.bones:
+        if not bone.parent:
+            root_bones[bone.name] = bone_to_dict(bone, whiteList)
+    return root_bones
 
 
-def add_mapping(armatures: Sequence['bpy.types.Object'] | None = None, check=True):
+class Bbox:
+    _min = _max = _center = _size = np.zeros(3)
+    @property
+    def min(self) -> np.ndarray: self._min = self._center - self._size / 2; return self._min
+    @property
+    def max(self) -> np.ndarray: self._max = self._center + self._size / 2; return self._max
+    @property
+    def center(self) -> np.ndarray: self._center = (self._min + self._max) / 2; return self._center
+    @property
+    def size(self) -> np.ndarray: self._size = self._max - self._min; return self._size
+    @min.setter
+    def min(self, value: np.ndarray): self._min = np.array(value)
+    @max.setter
+    def max(self, value: np.ndarray): self._max = np.array(value)
+    @center.setter
+    def center(self, value: np.ndarray): self._center = np.array(value)
+    @size.setter
+    def size(self, value: np.ndarray): self._size = np.array(value)
+
+    def __init__(self, center=None, size=None, min=None, max=None):
+        if min is not None and max is not None:
+            self._min = np.array(min)
+            self._max = np.array(max)
+        elif center is not None and size is not None:
+            self._center = np.array(center)
+            self._size = np.array(size)
+        else:
+            raise ValueError("Either (min, max) or (center, size) must be provided")
+
+
+def get_bbox(obj: bpy.types.Object):
+    """Get the bounding box of an object in world coordinates."""
+    if not obj:
+        raise ValueError("Object is None")
+    if not obj.bound_box:
+        raise ValueError(f"Object {obj.name} has no bounding box")
+    bbox_corners = [np.array(corner) for corner in obj.bound_box]
+    M_world = np.array(obj.matrix_world)
+    scale = np.array(obj.scale)
+    world_bbox = [(M_world @ np.append(corner / scale, 1))[:3] for corner in bbox_corners]
+    min_bound = np.array((min(c[0] for c in world_bbox), min(c[1] for c in world_bbox), min(c[2] for c in world_bbox)))
+    max_bound = np.array((max(c[0] for c in world_bbox), max(c[1] for c in world_bbox), max(c[2] for c in world_bbox)))
+    return Bbox(min=min_bound, max=max_bound)
+
+
+@contextmanager
+def fit_bbox(need_fit: bpy.types.Object, target: bpy.types.Object, restore=True):
+    '''use GRS(Transform) to make a's bound box fit b's bound box, and restore a's transform after context if `restore=True`.'''
+    orig_loc = need_fit.location.copy()
+    orig_rot = need_fit.rotation_euler.copy()
+    orig_scale = need_fit.scale.copy()
+    need_bbox = get_bbox(need_fit)
+    target_bbox = get_bbox(target)
+    need_fit.location = Vector(list(target_bbox.center))
+    need_fit.scale = Vector(list(map(float, (target_bbox.size / need_bbox.size))))
+    need_fit.rotation_euler = target.rotation_euler.copy()
+    yield
+    if restore:
+        need_fit.location = orig_loc
+        need_fit.rotation_euler = orig_rot
+        need_fit.scale = orig_scale
+
+
+def resort_from_BONES(
+    From: bpy.types.Object, To: bpy.types.Object,
+    From_bone_names: list[str] | None = None,
+    To_bone_names: list[str] | None = None
+):
+    """
+    Resort bone_names to make the order of From like To.
+
+    A=armature, B=refer_to:
+    1. Get 2 armatures and their selected bones.
+    2. Warn user that it must be T-pose rather than A-pose in EDIT mode
+    3. Resize & Move to make the 2 armatures border box size fit each other.
+    4. Calculate B armature's bones origins global location offset from A armature's bones. Each A bone has top 3 nearest B bones.
+    5. Weight pick algorithm, make the mapping list 1 to 1: 50% based on distance, 50% based on name.
+       If the name is matched: `short_name=A.name if len(A.name) < len(B.name) else A.name`, return True(50%) if short_name in long_name else False(0%).
+       If the name is not matched, adjust the distance max weight range from 50% to 100%.
+    6. return the mapping list
+    """
+    # Log.debug(f'resort {locals()=}')
+    # Warn T-pose
+    if not isinstance(From.data, bpy.types.Armature) or not isinstance(To.data, bpy.types.Armature):
+        raise ValueError(f'{From.name} or {To.name} is not an armature, please select an armature object.')
+    From_bones = From.data.bones
+    To_bones = To.data.bones
+    From_bones = [b for b in From_bones if in_or_skip(b.name, From_bone_names)]
+    To_bones = [b for b in To_bones if in_or_skip(b.name, To_bone_names)]
+    to_from: dict[str, dict[str, float]] = {}
+    with fit_bbox(need_fit=From, target=To):
+        for to_bone in To_bones:
+            # Get the 3 nearest From bones to To bone
+            distances: list[tuple[str, float]] = []
+            for from_bone in From_bones:
+                dist = (from_bone.head - to_bone.head).length
+                distances.append((from_bone.name, dist))
+            distances.sort(key=lambda x: x[1])
+            to_from[to_bone.name] = dict(distances)
+    FROM_BONES: list[str] = []
+    for to, froms in to_from.items():
+        try:
+            name = list(froms.keys())[0]
+        except StopIteration:
+            ...
+        FROM_BONES.append(name) if name else None
+    return FROM_BONES
+
+
+def add_mapping(*armature: bpy.types.Object):
     """
     add mapping based on selected armatures
     """
     files: list[str] = []
-    if not armatures:
-        armatures = get_armatures()
-    for armature in armatures:
-        tree = bones_tree(armature, whiteList=get_selected_bones(armature=armature))
-        bones = keys_BFS(tree)
+    armatures = get_armatures(*armature)
+    active = None
+    for arm in armatures:
+        if guess_mapping(arm, max_similar=0.5) != None:
+            if active is None:
+                active = arm
+            armatures.remove(arm)
+    if active is None:
+        Log.warning('Skip resort_from_BONES due to only select 1 armature. Try to select `SMPLX-...` as ACTIVE armature to resort BONES names smartly!')
+    for arm in armatures:
+        selected_bones = list(get_selected_bones(arm).values())[0]
+        tree = bones_tree(arm, whiteList=selected_bones)
+        bones = keys_BFS(tree, whitelist=selected_bones)
+        len_bones = len(bones)
+        len_smplx = len(Map()['smplx'].BONES)
+        if len_bones != len_smplx:
+            Log.warning(f'{arm.name}: selected {len_bones}, but should be {len_smplx}')
+        if active:
+            Log.debug(f'{active.name=}\t{arm.name=}\t{bones=}')
+            bones = resort_from_BONES(arm, active, bones)
+            Log.debug(f'resort {bones=}')
+
         map = {}
         for x, my in zip(Map()['smplx'].BONES, bones, strict=False):
             map[x] = my
@@ -592,14 +757,14 @@ def add_mapping(armatures: Sequence['bpy.types.Object'] | None = None, check=Tru
         # 《》 to {}
         t = re.sub(r'《', '{', t)
         t = re.sub(r'》', '}', t)
-        t = t.format(t, armature=armature.name, type_body=bones, map=map, bones_tree=tree)
+        t = t.format(t, armature=arm.name, type_body=bones, map=map, bones_tree=tree)
         # 「」 to {}
         t = re.sub(r'「', '{', t)
         t = re.sub(r'」', '}', t)
 
-        filename = f'{armature.name}.py'
+        filename = f'{arm.name}.py'
         file: str = os.path.join(DIR_MAPPING, filename)
-        if check and os.path.exists(file):
+        if os.path.exists(file):
             Log.error(f'Mapping exists: {file}')
         else:
             with open(file, 'w') as f:
@@ -608,37 +773,36 @@ def add_mapping(armatures: Sequence['bpy.types.Object'] | None = None, check=Tru
     return files
 
 
-def guess_obj_mapping(obj: 'bpy.types.Object') -> TYPE_MAPPING:
-    bones = bones_tree(obj)
+# @cache
+def guess_mapping(armature: 'bpy.types.Object', max_similar=0.01) -> tuple[TYPE_MAPPING | None, float]:
+    '''Return mapping[smpl/smplx/None], similar_score ∈[0, 1].
+
+    Guess armature mapping for `./mapping/*.py`, based on **bone names** similarity.
+    Args:
+        max_similar: the max similarity score. Could return None if max_similar > 0, always return None if max_similar > 1.
+    '''
+    bones = bones_tree(armature)
     keys = keys_BFS(bones)
     mapping = None
-    max_similar = 0
     for map, mod in Map().items():
         similar = get_similar(keys, mod.BONES)
         if similar > max_similar:
             max_similar = similar
             mapping = map
-    Log.info(f'Guess mapping to: {mapping} with {max_similar:.2f}')
-    return mapping  # type: ignore
+    Log.info(f'Guess mapping to: {mapping} of {armature.name} with {max_similar:.2f}')
+    return mapping, max_similar
 
 
-def get_bones(
+def get_BONES(
     armature: 'bpy.types.Object',
     key: TYPE_MAPPING_KEYS = 'BONES',
-    mapping: TYPE_MAPPING | None = None,
 ):
-    """
-    guess mapping[smpl,smplx]/Range_end/bone_rotation_mode[eular,quat]
-
-    Usage:
-    ```python
-    data, BODY, armature, Slice = check_before_run(data, 'BODY', 'gvhmr', mapping, Slice)
-    ```
-    """
-    mapping = None if mapping == 'auto' else mapping
-    mapping = get_mapping(mapping=mapping, armature=armature)
-    BONES: list[str] = getattr(Map()[mapping], key)   # type:ignore
-    # Log.debug("mapping from {}".format(f'{data.mapping}→{mapping}' if data.mapping[:2] != mapping[:2] else mapping))
+    """guess mapping[smpl,smplx]"""
+    mapping, _ = guess_mapping(armature=armature)
+    if not mapping:
+        Log.error(f'No mapping found for {armature.name}, please add mapping first.')
+        return []
+    BONES: list[str] = getattr(Map()[mapping], key)
     return BONES
 
 
@@ -665,16 +829,17 @@ def get_bones_info(armature=None):
     armatures = get_armatures()
     S = ""
     for armature in armatures:
-        tree = bones_tree(armature=armature)
-        List = keys_BFS(tree)
-        S += f"""TYPE_BODY = Literal{List}
+        selected_bones = list(get_selected_bones(armature).values())[0]
+        Log.debug(f'get_bones_info {selected_bones=}')
+        tree = bones_tree(armature=armature, whiteList=selected_bones)
+        List = keys_BFS(tree, whitelist=selected_bones)
+        S += f"""# len={len(List)}
+TYPE_BODY = Literal{List}
 BONES_TREE = {tree}"""
-        # for b in List:
-        #     global_rot = get_bone_global_rotation(armature=armature, bone=b)
-        #     S += f"\n{b}:\n{global_rot.to_quaternion()}"
-        cur = bpy.context.scene.frame_current   # type: ignore
-        S += '\nget_bones_global_rotation:\n' + str(get_bones_global_rotation(armature=armature, bone_resort=List, Slice=slice(cur, cur + 1)))
-        S += '\nget_bones_relative_rotation:\n' + str(get_bones_relative_rotation(armature=armature, bone_resort=List, Slice=slice(cur, cur + 1)))
+        # cur = bpsy.context.scene.frame_current
+        # S += '\nget_bones_global_rotation:\n' + str(get_bones_global_rotation(armature=armature, bone_resort=List, Slice=slice(cur, cur + 1)))
+        # S += '\nget_bones_relative_rotation:\n' + str(get_bones_relative_rotation(armature=armature, bone_resort=List, Slice=slice(cur, cur + 1)))
+        guess_mapping(armature)
     return S
 
 
@@ -692,10 +857,10 @@ def data_Slice_name_transl_rotate(data: MotionData, Slice: slice, run: TYPE_RUN)
     return data, Slice, name, transl, rotate
 
 
-def armature_BODY(mapping: TYPE_MAPPING | None = None, key: TYPE_MAPPING_KEYS = 'BONES'):
+def armature_BONES(mapping: TYPE_MAPPING | None = None, key: TYPE_MAPPING_KEYS = 'BONES'):
     armature = get_armatures()[0]
-    BODY = get_bones(armature, key=key, mapping=mapping)
-    return armature, BODY
+    BONES = get_BONES(armature, key=key, mapping=mapping)
+    return armature, BONES
 
 
 def gen_FKtoIK():
@@ -830,7 +995,7 @@ def pose_apply(
     if transl is not None:
         if transl_base is not None:
             transl = transl - transl_base
-            add_keyframes(action, transl_base, frame, f'location', 'Object Transforms')
+            yield from add_keyframes(action, transl_base, frame, f'location', 'Object Transforms')
         pg_t = Progress(len(transl))
         yield from add_keyframes(action, transl, frame, f'pose.bones["{bones[0]}"].location', bones[0], update=pg_t.update)
 

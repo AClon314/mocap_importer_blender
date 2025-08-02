@@ -23,10 +23,7 @@ def gvhmr(
     ```
     """
     data, Slice, name, transl, rotate = data_Slice_name_transl_rotate(data, Slice, run='gvhmr')
-    if transl is not None:
-        kw = dict(transl_base=transl[base_frame])
-    else:
-        kw = {}
+    transl_base = None if transl is None else transl[base_frame]
     body_pose = data('body_pose')
     if not body_pose:  # for cam@
         objs = bpy.context.selected_objects
@@ -36,14 +33,14 @@ def gvhmr(
             cam = bpy.context.object
             if not cam:
                 raise RuntimeError('No active object and failed to add camera')
-                return
         with bpy_action(cam, name) as action:
             yield from transform_apply(obj=cam, action=action, rotate=rotate, transl=transl)
         return
 
-    armature, BODY = armature_BODY(mapping, key='BODY')
+    armature, BODY = armature_BONES(mapping, key='BODY')
     rotate = rotate.reshape(-1, 1, rotate.shape[-1])
     pose = body_pose.value[Slice]
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3 or 4)
+    Log.debug(f'{transl_base=}')
     with bpy_action(armature, name) as action:
-        yield from pose_apply(armature=armature, action=action, pose=pose, transl=transl, bones=BODY, frame=data.begin + 1, **kw, **kwargs)
+        yield from pose_apply(armature=armature, action=action, pose=pose, transl=transl, bones=BODY, frame=data.begin + 1, transl_base=transl_base, **kwargs)

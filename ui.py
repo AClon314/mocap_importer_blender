@@ -3,9 +3,9 @@
 import os
 import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
-from .b import gen_FKtoIK, add_mapping, decimate, gen_decimate, get_armatures, load_data, items_motions, items_mapping, get_bones_info, apply
+from .b import fit_bbox, gen_FKtoIK, add_mapping, decimate, gen_decimate, get_active_selected_objs, get_armatures, load_data, items_motions, items_mapping, get_bones_info, apply
 from .logger import _PKG_
-from .lib import DIR_MAPPING, DIR_SELF, Progress, GEN, gen_calc, Log
+from .lib import DIR_MAPPING, DIR_SELF, Map, Progress, GEN, gen_calc, Log
 from .bbox import bbox
 from .libs import fk_to_ik
 VIDEO_EXT = "webm,mkv,flv,flv,vob,vob,ogv,ogg,drc,gifv,webm,gifv,mng,avi,mov,qt,wmv,yuv,rm,rmvb,viv,asf,amv,mp4,m4p,m4v,mpg,mp2,mpeg,mpe,mpv,mpg,mpeg,m2v,m4v,svi,3gp,3g2,mxf,roq,nsv,flv,f4v,f4p,f4a,f4b".split(',')
@@ -147,6 +147,7 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
         props = Props(context)
         col = layout.column()
         col.operator('armature.get_bones_info', icon='BONE_DATA')
+        col.operator('mocap.fit_bbox', icon='CUBE', text='Fit Bbox')
         # col.operator('mocap.export', icon='EXPORT', text='Export')
         row = col.row(align=True)
         row.operator('mocap.start_timer', icon='TIME')
@@ -173,7 +174,11 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
         return True
 
 
-class TimerOperator(bpy.types.Operator):
+class Operator:
+    bl_options = {'REGISTER', 'UNDO'}
+
+
+class TimerOperator(Operator, bpy.types.Operator):
     bl_idname = "mocap.start_timer"
     bl_label = "Timer"
     bl_description = "Setup timer for Progress"
@@ -214,7 +219,7 @@ class TimerOperator(bpy.types.Operator):
         return {'CANCELLED'}
 
 
-class PauseOperator(bpy.types.Operator):
+class PauseOperator(Operator, bpy.types.Operator):
     bl_idname = "mocap.pause"
     bl_label = "Pause"
     bl_description = "暂停"
@@ -224,7 +229,7 @@ class PauseOperator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class ContinueOperator(bpy.types.Operator):
+class ContinueOperator(Operator, bpy.types.Operator):
     bl_idname = "mocap.continue"
     bl_label = "Continue"
     bl_description = "继续"
@@ -234,7 +239,7 @@ class ContinueOperator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class CancelOperator(bpy.types.Operator):
+class CancelOperator(Operator, bpy.types.Operator):
     bl_idname = "mocap.cancel"
     bl_label = "Cancel"
     bl_description = "取消"
@@ -244,10 +249,9 @@ class CancelOperator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class ApplyMocap_Operator(bpy.types.Operator):
+class ApplyMocap_Operator(Operator, bpy.types.Operator):
     bl_idname = 'mocap.apply'
     bl_label = 'Apply'
-    bl_options = {'REGISTER', 'UNDO'}
     bl_description = 'Apply selected mocap data from npz file.'
 
     @execute
@@ -258,12 +262,11 @@ class ApplyMocap_Operator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class Bbox_Operator(bpy.types.Operator):
+class Bbox_Operator(Operator, bpy.types.Operator):
     bl_idname = 'mocap.bbox'
     bl_label = 'Boundary'  # TODO 'Bounding Box' is not translated
     bl_translation_context = 'Brush'
     bl_description = 'see bbox from npz file.'
-    bl_options = {'REGISTER', 'UNDO'}
 
     @execute
     def execute(self, context):
@@ -273,7 +276,7 @@ class Bbox_Operator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class LoadFile_Operator(bpy.types.Operator, ImportHelper):
+class LoadFile_Operator(Operator, bpy.types.Operator, ImportHelper):
     bl_idname = 'mocap.load_file'
     bl_label = 'Load'
     bl_description = 'gvhmr/wilor ouput .npz file, generated from mocap_wrapper; or video like .mp4'
@@ -295,32 +298,19 @@ class LoadFile_Operator(bpy.types.Operator, ImportHelper):
         return {'FINISHED'}
 
 
-class GetBonesInfo_Operator(bpy.types.Operator):
-    bl_idname = 'armature.get_bones_info'
-    bl_label = 'print bones'
-    bl_description = 'print bones info for making mapping or debugging'
-
-    @execute
-    def execute(self, context):
-        s = get_bones_info()
-        Log.info(s, extra={'mouse': False})
-        return {'FINISHED'}
-
-
-class OpenMapping_Operator(bpy.types.Operator):
+class OpenMapping_Operator(Operator, bpy.types.Operator):
     bl_idname = 'wm.open_dir_mapping'
     bl_label = 'Open Folder'
     bl_description = 'Open mapping folder'
 
     @execute
     def execute(self, context):
-        # TODO: when no file manager opened, this may freeze or popop with DEFAULT style in linux
         bpy.ops.wm.path_open(filepath=DIR_MAPPING)
         items_mapping.cache_clear()
         return {'FINISHED'}
 
 
-class AddMapping_Operator(bpy.types.Operator):
+class AddMapping_Operator(Operator, bpy.types.Operator):
     bl_idname = 'mocap.add_mapping'
     bl_label = 'Add Mapping'
     bl_description = 'Add mapping based on selected armature'
@@ -337,11 +327,10 @@ class AddMapping_Operator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class FK_to_IK_Operator(bpy.types.Operator):
+class FK_to_IK_Operator(Operator, bpy.types.Operator):
     bl_idname = 'mocap.fk_to_ik'
     bl_label = 'FK to IK'
-    bl_description = 'Append FK bones to IK'
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = 'FK to IK, then append the IK bones to current armature'
 
     @execute
     def execute(self, context):
@@ -350,11 +339,11 @@ class FK_to_IK_Operator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class Decimate_Operator(bpy.types.Operator):
+class Decimate_Operator(Operator, bpy.types.Operator):
     bl_idname = 'mocap.decimate'
     bl_label = 'Decimate Curve'
-    bl_description = 'Decimate F-Curves by removing closely spaced keyframes'
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = 'Simplify F-Curves by removing closely spaced keyframes'
+    bl_translation_context = 'Operator'
 
     @execute
     def execute(self, context):
@@ -363,12 +352,11 @@ class Decimate_Operator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class TaskQueue_Operator(bpy.types.Operator):
+class TaskQueue_Operator(Operator, bpy.types.Operator):
     bl_idname = 'mocap.start_task_queue'
     bl_label = 'Begin'
     bl_description = 'Start the task queue for processing mocap data'
     bl_translation_context = 'WindowManager'
-    bl_options = {'REGISTER', 'UNDO'}
 
     @execute
     def execute(self, context):
@@ -376,6 +364,35 @@ class TaskQueue_Operator(bpy.types.Operator):
         bpy.ops.mocap.apply() if props.is_import else None  # type: ignore
         bpy.ops.mocap.fk_to_ik() if props.is_fk_to_ik else None    # type: ignore
         bpy.ops.mocap.decimate() if props.is_decimate else None  # type: ignore
+        return {'FINISHED'}
+
+
+class GetBonesInfo_Operator(Operator, bpy.types.Operator):
+    bl_idname = 'armature.get_bones_info'
+    bl_label = 'print bones'
+    bl_description = 'print bones info for making mapping or debugging'
+    bl_options = {'REGISTER'}
+
+    @execute
+    def execute(self, context):
+        s = get_bones_info()
+        Log.info(s, extra={'mouse': False})
+        return {'FINISHED'}
+
+
+class FitBbox_Operator(Operator, bpy.types.Operator):
+    bl_idname = 'mocap.fit_bbox'
+    bl_label = 'Fit Bbox'
+    bl_description = 'Fit the selected object to the bounding box of the target object'
+
+    @execute
+    def execute(self, context):
+        # get the selected objects
+        objs = get_active_selected_objs(context.selected_objects)
+        if len(objs) != 2 or objs[0] not in objs:
+            raise ValueError('Please select exactly two objects: the one to fit and the target object.')
+        with fit_bbox(need_fit=objs[1], target=objs[0], restore=False):
+            ...
         return {'FINISHED'}
 
 
@@ -429,10 +446,10 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         translation_context='Operator',
         description='How much the new decimated curve is allowed to deviate from the original',
         subtype='FACTOR',
-        default=0,  # 0.01
+        default=0.03,  # 0.01
         max=1,
         soft_min=0,
-        soft_max=0.05,
+        soft_max=0.1,
         step=1,
         precision=3,
     )  # type: ignore

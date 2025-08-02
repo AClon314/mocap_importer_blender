@@ -14,7 +14,7 @@ def wrist_hand(
     pose = np.concatenate([wrist, hand], axis=1)  # (frames,16,3|4)
     prefix = 'left_' if is_left else 'right_'
     name_wrist: str = BODY[21] if is_left else BODY[22]  # +1 offset
-    bones_names = [name_wrist] + [prefix + bone for bone in HAND]
+    bones_names = [name_wrist] + [bone for bone in HAND if bone.startswith(prefix)]
     Log.debug(f'{pose=}')
     return pose, bones_names
 
@@ -40,7 +40,7 @@ def wilor(
     """
     # get hand data
     data, Slice, name, transl, rotate = data_Slice_name_transl_rotate(data, Slice, run='wilor')
-    armature, HAND = armature_BODY(mapping, key='HANDS')
+    armature, HAND = armature_BONES(mapping, key='HANDS')
     hand_pose = data('hand_pose').value[Slice]
     rotate = data('global_orient').value[Slice]
 

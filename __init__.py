@@ -16,7 +16,7 @@ bl_info = {
     "author": "Nolca",
     "description": "Import mocap data based on smpl-x model, support gvhmr, wilor, tram... Suggest to use with **mocap-wrapper**. 基于 smpl-x 模型导入 mocap 数据，建议与**mocap-wrapper**一起使用。",
     "blender": (2, 80, 0),
-    "version": (0, 2, 0),
+    "version": (0, 3, 0),
     "location": "View3D > Sidebar > Animation > Motion tracking tools",
     "warning": "",
     "category": "Animation",

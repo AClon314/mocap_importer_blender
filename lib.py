@@ -1,14 +1,14 @@
 """
-lib.py is a share lib that not rely on bpy module
+lib.py is a share lib that not rely on bpy module, include basic data class and calculate functions.
 """
 import os
 import sys
+import functools
 import importlib
 import itertools
 import numpy as np
 from time import time
 from collections import UserDict
-from functools import cache
 from .logger import Log
 from types import ModuleType
 from typing import Any, Callable, Dict, Generator, Iterable, ParamSpec, Sequence, Literal, TypeVar, cast, get_args
@@ -25,9 +25,19 @@ _TV = TypeVar("_TV")
 TYPE_PROP = Literal['body_pose', 'hand_pose', 'global_orient', 'betas', 'transl', 'bbox']
 PROP_KEY = get_args(TYPE_PROP)
 def get_major(L: Sequence[_TV]) -> _TV | None: return max(L, key=L.count) if L else None
-def Map(Dir='mapping') -> Dict[TYPE_MAPPING | str, ModuleType]: return Mod(Dir=Dir)
-def Run(Dir='run') -> Dict[TYPE_RUN | str, ModuleType]: return Mod(Dir=Dir)
 def Axis(is_torch=False): return 'dim' if is_torch else 'axis'
+
+
+def cache(func: Callable):
+    cached = functools.cache(func)
+    functools.update_wrapper(cached, func)
+    return cached
+
+
+@cache
+def Map(Dir='mapping') -> Dict[TYPE_MAPPING | str, ModuleType]: return Mod(Dir=Dir)
+@cache
+def Run(Dir='run') -> Dict[TYPE_RUN | str, ModuleType]: return Mod(Dir=Dir)
 
 
 def copy_args(
@@ -40,7 +50,7 @@ def copy_args(
 
 
 def in_or_skip(part, full, pattern=''):
-    """used in class `MotionData`"""
+    """Check if `part` is in `full`, or if `part` is None/empty or `full` is None/empty`, return True. optionally Format-string with `pattern`."""
     if pattern:
         part = pattern.format(part) if part else None
         full = pattern.format(full) if full else None
@@ -48,7 +58,7 @@ def in_or_skip(part, full, pattern=''):
 
 
 def warn_or_return_first(L: list[_TV]) -> _TV:
-    """used in class `MotionData`"""
+    """Warn if more than one item in list, return the first item."""
     Len = len(L)
     if Len > 1:
         Log.warning(f'{Len} > 1', extra={'report': True, 'mouse': False})
@@ -63,7 +73,6 @@ def format_sec(seconds: float):
     return f"{s}s" if m == 0 else f"{m}:{s}"
 
 
-@cache
 def Mod(Dir='mapping'):
     files = os.listdir(os.path.join(DIR_SELF, Dir))
     pys = []
@@ -362,18 +371,17 @@ def log_array(arr: np.ndarray | list, name='ndarray'):
 
 
 def bone_to_dict(bone, whitelist: Sequence[str] | None = None):
-    """bone to dict, Recursive calls to this function form a tree"""
-    # if deep_max and deep > deep_max:
-    #     raise ValueError(f'Bones tree too deep, {deep} > {deep_max}')
+    """bone to dict, Recursive calls to this function form a tree
+
+    Args:
+        whitelist (Sequence[str], optional): list of bone names to include. Defaults to None.
+    """
     return {child.name: bone_to_dict(child) for child in bone.children if in_or_skip(child.name, whitelist)}
 
 
-def keys_BFS(
-    d: dict, wrap=False,
-    deep_max=1000,
-):
+def keys_BFS(d: dict, wrap=False, whitelist: Sequence[str] | None = None):
     """
-    sort keys of dict by BFS
+    sort keys of dict by BFS (Breadth-First Search) algorithm.
 
     Parameters
     ----------
@@ -387,23 +395,14 @@ def keys_BFS(
     ret = []
     Q = [d]  # 初始队列包含根字典
     while Q:
-        if deep_max and deep > deep_max:
-            raise ValueError(f'Dict tree too deep, {deep} > {deep_max}')
         current_level = []
         next_queue = []
         for current_dict in Q:
-            # 收集当前字典的所有键到当前层级
-            current_level.extend(current_dict.keys())
-            # 收集当前字典的所有子字典到下一层队列
-            next_queue.extend(current_dict.values())
-        # 如果当前层级有键，则添加到结果中
-        if current_level:
-            if wrap:
-                ret.append(current_level)
-            else:
-                ret.extend(current_level)
-        # 更新队列为下一层级的子字典列表
-        Q = next_queue
+            current_level.extend(current_dict.keys())  # 收集当前字典的所有键到当前层级
+            next_queue.extend(current_dict.values())  # 收集当前字典的所有子字典到下一层队列
+        current_level = [k for k in current_level if in_or_skip(k, whitelist)]
+        ret.append(current_level) if wrap else ret.extend(current_level)
+        Q = next_queue  # 更新队列为下一层级的子字典列表
         deep += 1
     return ret
 
@@ -419,20 +418,6 @@ def get_similar(list1, list2):
     union = len(set1 | set2)
     ret = intersection / union if union != 0 else 0
     return ret
-
-
-def get_mapping(mapping: TYPE_MAPPING | None = None, armature=None):
-    """
-    import mapping module by name
-    will set global variable BODY(temporary)
-    """
-    from .b import get_armatures, guess_obj_mapping
-    if mapping is None:
-        armature = get_armatures(armatures=[armature])[0]
-        mapping = guess_obj_mapping(armature)
-    if mapping is None:
-        raise ValueError(f'Unknown mapping: {mapping}, try to select/add new mapping to')
-    return mapping
 
 
 def quat(xyz: np.ndarray) -> np.ndarray:
@@ -838,19 +823,3 @@ def rotMat_relative(rotMats: 'np.ndarray', base_frame=0):
     for i in range(rotMats.shape[0]):
         results[i] = zero_rot_inv @ rotMats[i]
     return results
-
-
-def register():
-    ...
-
-
-def unregister():
-    ...
-
-
-if __name__ == "__main__":
-    # debug
-    try:
-        ...
-    except ImportError:
-        ...

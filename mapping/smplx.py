@@ -41,6 +41,7 @@ BODY = list(get_args(TYPE_BODY))
 HEAD = list(get_args(TYPE_HEAD))
 HANDS = list(get_args(TYPE_HANDS))
 HANDS = [bone + str(i) for bone in HANDS for i in range(1, 4)]
+HANDS = ['left_' + bone for bone in HANDS] + ['right_' + bone for bone in HANDS]
 BONES = BODY + HEAD + HANDS
 
 MAP: Dict[TYPE_BONES, TYPE_BONES] = {k: k for k in BODY}
