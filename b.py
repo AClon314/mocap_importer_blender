@@ -39,7 +39,7 @@ def apply(*who: str, mapping: TYPE_MAPPING | None = None, **kwargs):
 
 def props_filter(who: Sequence[str], mapping=None):
     '''filter from ui.py, for lib.py'''
-    if mapping == 'Auto detect':
+    if mapping == 'auto':
         mapping = None
     if len(who) == 1 and who[0] == 'all':
         whos = [m[0] for m in items_motions()]
@@ -617,13 +617,13 @@ class Bbox:
     @property
     def size(self) -> np.ndarray: self._size = self._max - self._min; return self._size
     @min.setter
-    def min(self, value: np.ndarray): self._min = np.array(value)
+    def min(self, value): self._min = np.array(value)
     @max.setter
-    def max(self, value: np.ndarray): self._max = np.array(value)
+    def max(self, value): self._max = np.array(value)
     @center.setter
-    def center(self, value: np.ndarray): self._center = np.array(value)
+    def center(self, value): self._center = np.array(value)
     @size.setter
-    def size(self, value: np.ndarray): self._size = np.array(value)
+    def size(self, value): self._size = np.array(value)
 
     def __init__(self, center=None, size=None, min=None, max=None):
         if min is not None and max is not None:
@@ -654,17 +654,20 @@ def get_bbox(obj: bpy.types.Object):
 @contextmanager
 def fit_bbox(need_fit: bpy.types.Object, target: bpy.types.Object, restore=True):
     '''use GRS(Transform) to make a's bound box fit b's bound box, and restore a's transform after context if `restore=True`.'''
-    orig_loc = need_fit.location.copy()
+    orig_loc = need_fit.matrix_world.translation.copy()
     orig_rot = need_fit.rotation_euler.copy()
     orig_scale = need_fit.scale.copy()
+
     need_bbox = get_bbox(need_fit)
     target_bbox = get_bbox(target)
-    need_fit.location = Vector(list(target_bbox.center))
+    need_offset = need_bbox.center - np.array(orig_loc)
+
+    need_fit.matrix_world.translation = Vector(list(target_bbox.center - need_offset))
     need_fit.scale = Vector(list(map(float, (target_bbox.size / need_bbox.size))))
     need_fit.rotation_euler = target.rotation_euler.copy()
     yield
     if restore:
-        need_fit.location = orig_loc
+        need_fit.matrix_world.translation = orig_loc
         need_fit.rotation_euler = orig_rot
         need_fit.scale = orig_scale
 
@@ -701,17 +704,16 @@ def resort_from_BONES(
             # Get the 3 nearest From bones to To bone
             distances: list[tuple[str, float]] = []
             for from_bone in From_bones:
-                dist = (from_bone.head - to_bone.head).length
+                dist = (From.matrix_world @ from_bone.head - To.matrix_world @ to_bone.head).length
                 distances.append((from_bone.name, dist))
             distances.sort(key=lambda x: x[1])
             to_from[to_bone.name] = dict(distances)
     FROM_BONES: list[str] = []
     for to, froms in to_from.items():
-        try:
-            name = list(froms.keys())[0]
-        except StopIteration:
-            ...
-        FROM_BONES.append(name) if name else None
+        froms = list(froms.keys())
+        for f in froms:
+            if f not in FROM_BONES:
+                FROM_BONES.append(f)
     return FROM_BONES
 
 
@@ -796,9 +798,11 @@ def guess_mapping(armature: 'bpy.types.Object', max_similar=0.01) -> tuple[TYPE_
 def get_BONES(
     armature: 'bpy.types.Object',
     key: TYPE_MAPPING_KEYS = 'BONES',
+    mapping: TYPE_MAPPING | None = None
 ):
     """guess mapping[smpl,smplx]"""
-    mapping, _ = guess_mapping(armature=armature)
+    if mapping is None:
+        mapping, _ = guess_mapping(armature=armature)
     if not mapping:
         Log.error(f'No mapping found for {armature.name}, please add mapping first.')
         return []
@@ -858,7 +862,7 @@ def data_Slice_name_transl_rotate(data: MotionData, Slice: slice, run: TYPE_RUN)
 
 
 def armature_BONES(mapping: TYPE_MAPPING | None = None, key: TYPE_MAPPING_KEYS = 'BONES'):
-    armature = get_armatures()[0]
+    armature = get_armatures()[0]   # TODO
     BONES = get_BONES(armature, key=key, mapping=mapping)
     return armature, BONES
 
