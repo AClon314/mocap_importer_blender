@@ -744,10 +744,6 @@ def add_mapping(*armature: bpy.types.Object):
             bones = resort_from_BONES(arm, active, bones)
             Log.debug(f'resort {bones=}')
 
-        map = {}
-        for x, my in zip(Map()['smplx'].BONES, bones, strict=False):
-            map[x] = my
-
         t = ''
         with open(MAPPING_TEMPLATE, 'r') as f:
             t = f.read()
@@ -759,7 +755,7 @@ def add_mapping(*armature: bpy.types.Object):
         # 《》 to {}
         t = re.sub(r'《', '{', t)
         t = re.sub(r'》', '}', t)
-        t = t.format(t, armature=arm.name, type_body=bones, map=map, bones_tree=tree)
+        t = t.format(t, armature=arm.name, type_body=bones, bones_tree=tree)
         # 「」 to {}
         t = re.sub(r'「', '{', t)
         t = re.sub(r'」', '}', t)
