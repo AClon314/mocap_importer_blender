@@ -14,10 +14,6 @@ HEAD = list(get_args(TYPE_HEAD))
 HANDS = list(get_args(TYPE_HANDS))
 BONES = BODY + HEAD + HANDS
 
-from .smplx import TYPE_BONES as T_BONES
-MAP: Dict[T_BONES, TYPE_BONES] = {map}   # type: ignore
-MAP_R = {v: k for k, v in MAP.items()}
-BONES_TREE = {bones_tree}  # type: ignore
 from ..b import TYPE_I18N
 HELP: Dict[TYPE_I18N, str | None] = {
     'en_US': __doc__,

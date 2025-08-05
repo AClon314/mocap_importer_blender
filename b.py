@@ -21,33 +21,33 @@ TYPE_I18N = Literal[  # blender 4.3.2
     'de_DE', 'it_IT', 'ka', 'ko_KR', 'pt_BR', 'pt_PT', 'ru_RU', 'sw', 'ta', 'tr_TR', 'uk_UA', 'zh_HANT',
     'ab', 'ar_EG', 'be', 'bg_BG', 'cs_CZ', 'da', 'el_GR', 'eo', 'eu_EU', 'fa_IR', 'fi_FI', 'ha', 'he_IL', 'hi_IN', 'hr_HR', 'hu_HU', 'id_ID', 'km', 'ky_KG', 'lt', 'ne_NP', 'nl_NL', 'pl_PL', 'ro_RO', 'sl', 'sr_RS', 'sr_RS@latin', 'sv_SE', 'th_TH'
 ]
-_MOTIONDATA = MotionData()
-MOTION_DATA = _MOTIONDATA
+MOTION_DATA = MotionData()
 
 
-def apply(*who: str, mapping: TYPE_MAPPING | None = None, **kwargs):
+def apply(*who: str, armature: bpy.types.Object | None = None, mapping: TYPE_MAPPING | None = None, **kwargs):
     Log.debug(f'apply {locals()=}')
-    whos, mapping = props_filter(who, mapping)
+    whos, armature, mapping = props_filter(who, armature, mapping)
     for w in whos:
         data = MOTION_DATA(who=w)
         for r in data.runs:
             run = getattr(Run()[r], r)
-            gen: Generator = run(data, mapping=mapping, **kwargs)
+            gen: Generator = run(armature=armature, data=data, mapping=mapping, **kwargs)
             GEN.append(gen)
     Log.debug(f'apply {len(GEN.queue)=} {GEN=}')
 
 
-def props_filter(who: Sequence[str], mapping=None):
+def props_filter(who: Sequence[str], armature: bpy.types.Object | None = None, mapping=None):
     '''filter from ui.py, for lib.py'''
+    armature = get_armatures()[0] if not armature else armature
     if mapping == 'auto':
-        mapping = None
+        mapping, _ = guess_mapping(armature)
     if len(who) == 1 and who[0] == 'all':
         whos = [m[0] for m in items_motions()]
         whos.remove('all')  # remove 'all' option
         whos = [m for m in whos if 'cam@' not in m]
     else:
         whos = list(who)
-    return whos, mapping
+    return whos, armature, mapping
 
 
 @cache
@@ -725,7 +725,7 @@ def add_mapping(*armature: bpy.types.Object):
     armatures = get_armatures(*armature)
     active = None
     for arm in armatures:
-        if guess_mapping(arm, max_similar=0.5) != None:
+        if guess_mapping(arm, min_similar=0.5) != None:
             if active is None:
                 active = arm
             armatures.remove(arm)
@@ -775,49 +775,44 @@ def add_mapping(*armature: bpy.types.Object):
     return files
 
 
-# @cache
-def guess_mapping(armature: 'bpy.types.Object', max_similar=0.01) -> tuple[TYPE_MAPPING | None, float]:
-    '''Return mapping[smpl/smplx/None], similar_score ∈[0, 1].
-
+@cache
+def guess_mapping(armature: 'bpy.types.Object', min_similar=0.01) -> tuple[TYPE_MAPPING | None, float]:
+    ''' 
     Guess armature mapping for `./mapping/*.py`, based on **bone names** similarity.
-    Args:
-        max_similar: the max similarity score. Could return None if max_similar > 0, always return None if max_similar > 1.
+
+    Returns
+    ---
+    mapping: [smpl/smplx/rigify/None]  
+    similar_score: ∈[0, 1]
+
+    Args
+    ---
+    min_similar: the minimum similarity score to consider a mapping valid.
     '''
-    bones = bones_tree(armature)
-    keys = keys_BFS(bones)
     mapping = None
+    max_similar = min_similar
+    keys = keys_BFS(bones_tree(armature))
     for map, mod in Map().items():
         similar = get_similar(keys, mod.BONES)
         if similar > max_similar:
             max_similar = similar
             mapping = map
-    Log.info(f'Guess mapping to: {mapping} of {armature.name} with {max_similar:.2f}')
+    Log.info(f'guess_mapping to: {mapping} of {armature.name=} with {max_similar=:.2f} > {min_similar=:.2f}')
     return mapping, max_similar
 
 
-def get_BONES(
-    armature: 'bpy.types.Object',
-    key: TYPE_MAPPING_KEYS = 'BONES',
-    mapping: TYPE_MAPPING | None = None
-):
-    """guess mapping[smpl,smplx]"""
-    if mapping is None:
-        mapping, _ = guess_mapping(armature=armature)
-    if not mapping:
-        Log.error(f'No mapping found for {armature.name}, please add mapping first.')
-        return []
-    BONES: list[str] = getattr(Map()[mapping], key)
-    return BONES
+def get_BONES(mapping: TYPE_MAPPING, key: TYPE_MAPPING_KEYS = 'BONES') -> list[str]: return getattr(Map()[mapping], key)
 
 
 def get_slice(data: MotionData, Slice: slice):
+    '''if Slice.stop is None, fallback to data length.'''
     Log.debug(f'{data.keys()=}')
     if Slice.stop is None:
         Len = len(data('global_orient').value)   # TODO: 使用专有信息 npz['meatadata'](dtype=object) as dict
         t = list(Slice.indices(Len))
         t[1] = Len
         Slice = slice(*t)
-        Log.info(f'Frame range (Slice) fallback to {Slice}')
+        Log.debug(f'Slice/Frame range fallback to {Slice}')
     return Slice
 
 
@@ -847,9 +842,12 @@ BONES_TREE = {tree}"""
     return S
 
 
-def data_Slice_name_transl_rotate(data: MotionData, Slice: slice, run: TYPE_RUN):
+def data_mapping_name_Slice_transl_rotate(armature: bpy.types.Object, data: MotionData, mapping: TYPE_MAPPING | None, Slice: slice, run: TYPE_RUN):
     data = data(mapping=data.mapping, run=run)  # type: ignore
-    name = ';'.join([data.who, data.run])
+    _mapping = guess_mapping(armature)[0] if not mapping else mapping
+    if not _mapping:
+        raise ValueError(f'No mapping found for {armature.name}, please select an armature with valid mapping.')
+    name = ';'.join([_mapping, data.who, data.run])
     Slice = get_slice(data, Slice)
 
     transl = data('transl')
@@ -858,13 +856,7 @@ def data_Slice_name_transl_rotate(data: MotionData, Slice: slice, run: TYPE_RUN)
     else:
         transl = None
     rotate = data('global_orient').value[Slice]
-    return data, Slice, name, transl, rotate
-
-
-def armature_BONES(mapping: TYPE_MAPPING | None = None, key: TYPE_MAPPING_KEYS = 'BONES'):
-    armature = get_armatures()[0]   # TODO
-    BONES = get_BONES(armature, key=key, mapping=mapping)
-    return armature, BONES
+    return data, _mapping, name, Slice, transl, rotate
 
 
 def gen_FKtoIK():

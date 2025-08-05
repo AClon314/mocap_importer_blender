@@ -3,11 +3,10 @@
 import os
 import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
-from .b import fit_bbox, gen_FKtoIK, add_mapping, decimate, gen_decimate, get_active_selected_objs, get_armatures, load_data, items_motions, items_mapping, get_bones_info, apply
+from .b import fit_bbox, gen_FKtoIK, add_mapping, gen_decimate, get_active_selected_objs, guess_mapping, load_data, items_motions, items_mapping, get_bones_info, apply
 from .logger import _PKG_
-from .lib import DIR_MAPPING, DIR_SELF, Map, Progress, GEN, gen_calc, Log
+from .lib import DIR_MAPPING, DIR_SELF, Progress, GEN, gen_calc, Log
 from .bbox import bbox
-from .libs import fk_to_ik
 VIDEO_EXT = "webm,mkv,flv,flv,vob,vob,ogv,ogg,drc,gifv,webm,gifv,mng,avi,mov,qt,wmv,yuv,rm,rmvb,viv,asf,amv,mp4,m4p,m4v,mpg,mp2,mpeg,mpe,mpv,mpg,mpeg,m2v,m4v,svi,3gp,3g2,mxf,roq,nsv,flv,f4v,f4p,f4a,f4b".split(',')
 BL_ID = 'MOCAP_PT_Panel'
 BL_CATAGORY = 'Animation'
@@ -24,11 +23,12 @@ def ui_to_b_kwargs(p: 'Mocap_PropsGroup'): return dict(mapping=p.mapping, keep_e
 
 
 def execute(func):
-    """bpy.Operator: `self.report()`"""
+    """bpy.Operator: `self.report()` and cache_clear()"""
 
-    def wrap(self, context):
+    def wrap(self, context: bpy.types.Context):
         setattr(Log, 'report', self.report)
         ret = func(self, context)
+        guess_mapping.cache_clear()
         return ret
     return wrap
 
@@ -190,9 +190,9 @@ class TimerOperator(Operator, bpy.types.Operator):
         if event.type == 'TIMER':
             try:
                 ret = gen_calc()
-            except Exception:
+            except Exception as e:
                 self.cancel(context=context)
-                raise
+                raise e
             if ret:
                 self.cancel(context)
                 return {'FINISHED'}
@@ -349,6 +349,7 @@ class Decimate_Operator(Operator, bpy.types.Operator):
     def execute(self, context):
         props = Props(context)
         GEN.append(gen_decimate(**ui_to_b_kwargs(props)))
+        bpy.ops.mocap.start_timer()  # type: ignore
         return {'FINISHED'}
 
 
@@ -361,9 +362,10 @@ class TaskQueue_Operator(Operator, bpy.types.Operator):
     @execute
     def execute(self, context):
         props = Props(context)
-        bpy.ops.mocap.apply() if props.is_import else None  # type: ignore
-        bpy.ops.mocap.fk_to_ik() if props.is_fk_to_ik else None    # type: ignore
-        bpy.ops.mocap.decimate() if props.is_decimate else None  # type: ignore
+        apply(props.motions, **ui_to_b_kwargs(props)) if props.is_import else None
+        GEN.append(gen_FKtoIK()) if props.is_fk_to_ik else None
+        GEN.append(gen_decimate(**ui_to_b_kwargs(props))) if props.is_decimate else None
+        bpy.ops.mocap.start_timer()  # type: ignore
         return {'FINISHED'}
 
 

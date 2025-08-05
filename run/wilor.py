@@ -20,6 +20,7 @@ def wrist_hand(
 
 
 def wilor(
+    armature: bpy.types.Object,
     data: MotionData,
     mapping: TYPE_MAPPING | None = None,
     Slice=slice(0, None),
@@ -39,8 +40,8 @@ def wilor(
     ```
     """
     # get hand data
-    data, Slice, name, transl, rotate = data_Slice_name_transl_rotate(data, Slice, run='wilor')
-    armature, HAND = armature_BONES(mapping, key='HANDS')
+    data, mapping, name, Slice, transl, rotate = data_mapping_name_Slice_transl_rotate(armature, data, mapping, Slice, run='wilor')
+    HAND = get_BONES(mapping=mapping, key='HANDS')
     hand_pose = data('hand_pose').value[Slice]
     rotate = data('global_orient').value[Slice]
 

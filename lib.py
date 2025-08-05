@@ -3,21 +3,21 @@ lib.py is a share lib that not rely on bpy module, include basic data class and 
 """
 import os
 import sys
-import functools
 import importlib
 import itertools
 import numpy as np
 from time import time
+from functools import cache
 from collections import UserDict
 from .logger import Log
 from types import ModuleType
-from typing import Any, Callable, Dict, Generator, Iterable, ParamSpec, Sequence, Literal, TypeVar, cast, get_args
+from typing import Callable, Dict, Generator, Iterable, ParamSpec, Sequence, Literal, TypeVar, cast, get_args
 INF = float('inf')
 BATCH_SIZE = 1
 DIR_SELF = os.path.dirname(__file__)
 DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
 MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
-TYPE_MAPPING = Literal['smpl', 'smplx']
+TYPE_MAPPING = Literal['smpl', 'smplx', 'rigify']
 TYPE_MAPPING_KEYS = Literal['BONES', 'BODY', 'HANDS', 'HEAD']
 TYPE_RUN = Literal['gvhmr', 'wilor']
 _PS = ParamSpec("_PS")
@@ -26,24 +26,15 @@ TYPE_PROP = Literal['body_pose', 'hand_pose', 'global_orient', 'betas', 'transl'
 PROP_KEY = get_args(TYPE_PROP)
 def get_major(L: Sequence[_TV]) -> _TV | None: return max(L, key=L.count) if L else None
 def Axis(is_torch=False): return 'dim' if is_torch else 'axis'
-
-
-def cache(func: Callable):
-    cached = functools.cache(func)
-    functools.update_wrapper(cached, func)
-    return cached
-
-
 @cache
-def Map(Dir='mapping') -> Dict[TYPE_MAPPING | str, ModuleType]: return Mod(Dir=Dir)
+def Map(Dir='mapping') -> Dict[TYPE_MAPPING, ModuleType]: return Mod(Dir=Dir)   # type: ignore
 @cache
-def Run(Dir='run') -> Dict[TYPE_RUN | str, ModuleType]: return Mod(Dir=Dir)
+def Run(Dir='run') -> Dict[TYPE_RUN, ModuleType]: return Mod(Dir=Dir)   # type: ignore
+# def cache(func: Callable[_PS, _TV]): return copy_args(func)(functools.cache(func))
 
 
-def copy_args(
-    func: Callable[_PS, Any]
-) -> Callable[[Callable[..., _TV]], Callable[_PS, _TV]]:
-    """Decorator does nothing but returning the casted original function"""
+def copy_args(func: Callable[_PS, _TV]):
+    """Decorator does nothing and returning the casted original function"""
     def return_func(func: Callable[..., _TV]) -> Callable[_PS, _TV]:
         return cast(Callable[_PS, _TV], func)
     return return_func
@@ -295,9 +286,9 @@ class MotionData(UserDict):
         return L
 
     @property
-    def mappings(self): return self.distinct(0)
+    def mappings(self) -> list[TYPE_MAPPING]: return self.distinct(0)  # type: ignore
     @property
-    def runs(self): return self.distinct(1)
+    def runs(self) -> list[TYPE_RUN]: return self.distinct(1)   # type: ignore
     @property
     def whos(self): return self.distinct(2)
     @property

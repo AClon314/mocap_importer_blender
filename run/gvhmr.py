@@ -4,6 +4,7 @@ from ..b import *
 
 
 def gvhmr(
+    armature: bpy.types.Object,
     data: MotionData,
     mapping: TYPE_MAPPING | None = None,
     Slice=slice(0, None),
@@ -22,7 +23,7 @@ def gvhmr(
     gvhmr(data('smplx', 'gvhmr', person=0))
     ```
     """
-    data, Slice, name, transl, rotate = data_Slice_name_transl_rotate(data, Slice, run='gvhmr')
+    data, mapping, name, Slice, transl, rotate = data_mapping_name_Slice_transl_rotate(armature, data, mapping, Slice, run='gvhmr')
     transl_base = None if transl is None else transl[base_frame]
     body_pose = data('body_pose')
     if not body_pose:  # for cam@
@@ -37,7 +38,7 @@ def gvhmr(
             yield from transform_apply(obj=cam, action=action, rotate=rotate, transl=transl)
         return
 
-    armature, BODY = armature_BONES(mapping, key='BODY')
+    BODY = get_BONES(mapping=mapping, key='BODY')
     rotate = rotate.reshape(-1, 1, rotate.shape[-1])
     pose = body_pose.value[Slice]
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,22,3 or 4)

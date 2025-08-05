@@ -61,7 +61,7 @@ def gen_bbox(
     bpy.context.view_layer.objects.active = video_plane
 
 
-@copy_args(gen_bbox)
+@copy_args(gen_bbox)  # type: ignore
 def bbox(*who: str, **kwargs):
     whos, _ = props_filter(who=who)
     for w in whos:
