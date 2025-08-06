@@ -13,7 +13,7 @@ from .logger import Log
 from types import ModuleType
 from typing import Callable, Dict, Generator, Iterable, ParamSpec, Sequence, Literal, TypeVar, cast, get_args
 INF = float('inf')
-BATCH_SIZE = 1
+EPSILON = 1e-8  # 数值稳定系数
 DIR_SELF = os.path.dirname(__file__)
 DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
 MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
@@ -35,8 +35,7 @@ def Run(Dir='run') -> Dict[TYPE_RUN, ModuleType]: return Mod(Dir=Dir)   # type: 
 
 def copy_args(func: Callable[_PS, _TV]):
     """Decorator does nothing and returning the casted original function"""
-    def return_func(func: Callable[..., _TV]) -> Callable[_PS, _TV]:
-        return cast(Callable[_PS, _TV], func)
+    def return_func(func: Callable[..., _TV]) -> Callable[_PS, _TV]: return cast(Callable[_PS, _TV], func)
     return return_func
 
 
@@ -83,7 +82,7 @@ def gen_calc():
     '''
     if Progress.PAUSE():
         return
-    global BATCH_SIZE
+    BATCH_SIZE = 1
     tick_prev = time()
     while True:
         Log.debug(f'gen_calc {len(Progress.selves)=} {len(GEN.queue)=} {BATCH_SIZE=}')
@@ -213,12 +212,13 @@ class Progress():
             self._current += self.Range.step
         else:
             self._current += step
-        now = time()
+        # now = time()
         # if now - self.tick_update >= self.update_interval:
         #     # wm.progress_update(self.current)
         #     self.tick_update = now
         if self._current >= self.Range.stop:
             self.pause = True
+        # Log.debug(f'{self._current}')
         return self._current
 
 
@@ -461,7 +461,6 @@ def euler(wxyz: np.ndarray) -> np.ndarray:
     assert wxyz.shape[-1] == 4, f"Last dimension should be 4, but found {wxyz.shape}"
     lib = Lib(wxyz)  # 自动检测库类型
     is_torch = lib.__name__ == 'torch'
-    EPSILON = 1e-12  # 数值稳定系数
 
     # 归一化四元数（防止输入未归一化）
     wxyz = wxyz / Norm(wxyz, dim=-1, keepdim=True)  # type: ignore
@@ -515,6 +514,17 @@ def Lib(arr, mod1: ModuleType | str = np, mod2: ModuleType | str = 'torch', ret_
         raise ImportError("Both libraries are not available.")
     # Log.debug(f"🔍 {mod.__name__}")
     return mod
+
+
+def quat_multiply(q1, q2):
+    w1, x1, y1, z1 = q1[..., 0], q1[..., 1], q1[..., 2], q1[..., 3]
+    w2, x2, y2, z2 = q2[..., 0], q2[..., 1], q2[..., 2], q2[..., 3]
+    result = Lib(q1).empty_like(q1)
+    result[..., 0] = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2  # w
+    result[..., 1] = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2  # x
+    result[..., 2] = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2  # y
+    result[..., 3] = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2  # z
+    return result
 
 
 def Norm(arr: np.ndarray, dim: int = -1, keepdim: bool = True) -> np.ndarray:
@@ -571,7 +581,6 @@ def Rodrigues(rot_vec3: np.ndarray) -> np.ndarray:
     # 计算旋转角度
     theta = Norm(rot_vec3, dim=-1, keepdim=True)  # (...,1)
 
-    EPSILON = 1e-8
     mask = theta < EPSILON
 
     # 处理小角度情况
@@ -611,7 +620,6 @@ def rotMat_to_quat(R: np.ndarray) -> np.ndarray:
     assert R.shape[-2:] == (3, 3), f"输入R的末两维必须为3x3，当前为{R.shape}"
     lib = Lib(R)  # 自动检测模块
     is_torch = lib.__name__ == 'torch'
-    EPSILON = 1e-12  # 数值稳定系数
 
     # 计算迹，形状为(...)
     trace = lib.einsum('...ii->...', R)

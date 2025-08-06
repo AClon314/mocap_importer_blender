@@ -5,7 +5,7 @@ fktoikaddon.Log = Log
 fktoikaddon.Progress = Progress
 fktoikaddon.GEN = GEN
 # IS_DEBUG = bpy.context.preferences.view.show_developer_ui
-from .FKtoIK.fktoikaddon import fk_to_ik
+from .FKtoIK.fktoikaddon import gen_fk_to_ik
 REG = [
     fktoikaddon.register
 ]

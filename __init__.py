@@ -21,16 +21,18 @@ bl_info = {
     "warning": "",
     "category": "Animation",
 }
-from . import auto_load
-from . import libs
+import bpy
+from . import auto_load, libs, b
 auto_load.init()
 
 
 def register():
     auto_load.register()
     libs.register()
+    bpy.app.handlers.load_post.append(b.load_data)
 
 
 def unregister():
+    bpy.app.handlers.load_post.remove(b.load_data)
     libs.unregister()
     auto_load.unregister()

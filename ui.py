@@ -3,7 +3,7 @@
 import os
 import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
-from .b import fit_bbox, gen_FKtoIK, add_mapping, gen_decimate, get_active_selected_objs, guess_mapping, load_data, items_motions, items_mapping, get_bones_info, apply
+from .b import fit_bbox, FKtoIK, add_mapping, gen_decimate, get_active_selected_objs, guess_mapping, load_data, items_motions, items_mapping, get_bones_info, apply
 from .logger import _PKG_
 from .lib import DIR_MAPPING, DIR_SELF, Progress, GEN, gen_calc, Log
 from .bbox import bbox
@@ -334,7 +334,7 @@ class FK_to_IK_Operator(Operator, bpy.types.Operator):
 
     @execute
     def execute(self, context):
-        GEN.append(gen_FKtoIK())
+        FKtoIK()
         bpy.ops.mocap.start_timer()  # type: ignore
         return {'FINISHED'}
 
@@ -363,7 +363,7 @@ class TaskQueue_Operator(Operator, bpy.types.Operator):
     def execute(self, context):
         props = Props(context)
         apply(props.motions, **ui_to_b_kwargs(props)) if props.is_import else None
-        GEN.append(gen_FKtoIK()) if props.is_fk_to_ik else None
+        FKtoIK() if props.is_fk_to_ik else None
         GEN.append(gen_decimate(**ui_to_b_kwargs(props))) if props.is_decimate else None
         bpy.ops.mocap.start_timer()  # type: ignore
         return {'FINISHED'}

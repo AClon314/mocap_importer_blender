@@ -36,12 +36,8 @@ extra={'mouse': True, 'report': True, 'log': True,
         Level = logging.getLevelName(level)
         lvl: str = Pop(extra, 'lvl', Level)
         # stack_info = False if stack_info == None else stack_info
-        if level == logging.DEBUG:
-            is_mouse = False
-            is_report = False
-        else:
-            is_mouse: bool = Pop(extra, 'mouse', level != logging.ERROR)
-            is_report: bool = Pop(extra, 'report', True)
+        is_mouse: bool = Pop(extra, 'mouse', level not in (logging.ERROR, logging.DEBUG))
+        is_report: bool = Pop(extra, 'report', level > logging.INFO)
         is_log: bool = Pop(extra, 'log', not is_report)
         kwargs = dict(level=level, msg=msg, args=args, exc_info=exc_info, extra=extra, stack_info=stack_info, stacklevel=stacklevel)
         try:

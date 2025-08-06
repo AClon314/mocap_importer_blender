@@ -21,7 +21,7 @@ TYPE_I18N = Literal[  # blender 4.3.2
     'de_DE', 'it_IT', 'ka', 'ko_KR', 'pt_BR', 'pt_PT', 'ru_RU', 'sw', 'ta', 'tr_TR', 'uk_UA', 'zh_HANT',
     'ab', 'ar_EG', 'be', 'bg_BG', 'cs_CZ', 'da', 'el_GR', 'eo', 'eu_EU', 'fa_IR', 'fi_FI', 'ha', 'he_IL', 'hi_IN', 'hr_HR', 'hu_HU', 'id_ID', 'km', 'ky_KG', 'lt', 'ne_NP', 'nl_NL', 'pl_PL', 'ro_RO', 'sl', 'sr_RS', 'sr_RS@latin', 'sv_SE', 'th_TH'
 ]
-MOTION_DATA = MotionData()
+MOTION_DATA = _MOTION_DATA = MotionData()
 
 
 def apply(*who: str, armature: bpy.types.Object | None = None, mapping: TYPE_MAPPING | None = None, **kwargs):
@@ -82,7 +82,7 @@ def items_motions(self=None, context=None):
         items.append((tag_k[t], f'{t};{ranges[t]}', f'tags={len(TAG)}: {TAG}'))
     items.sort(key=lambda x: f'{len(tags[k_tag[x[0]]])}{x[0]}')
     all[-1] = all[-1].format(len(tags))
-    items.insert(0, tuple(all))  # type: ignore
+    items.insert(0, tuple(all)) if len(items) > 0 else None  # type: ignore
     return items
 
 
@@ -118,14 +118,16 @@ def items_mapping(self=None, context=None):
     return items
 
 
+@bpy.app.handlers.persistent
 def load_data(self=None, context=None):
     """load motion data when npz file path changed"""
     global MOTION_DATA
     file = bpy.context.scene.mocap_importer.input_file   # type: ignore
     if os.path.exists(file) and file != MOTION_DATA.npz:
-        del MOTION_DATA
         MOTION_DATA = MotionData(npz=file)
         items_motions.cache_clear()
+    else:
+        MOTION_DATA = _MOTION_DATA
 
 
 def get_bone_global_rotation(
@@ -190,7 +192,7 @@ def get_bones_global_rotation(
     total_bones = len(bone_names)
 
     # 初始化数组
-    rot_mode = get_bone_rotation_mode(armature)
+    rot_mode = get_bone_rotation_mode(armature, bone_names)
     rot_arr = np.zeros((len(frames), total_bones, 4 if rot_mode == 'QUATERNION' else 3))
 
     # 导出数据
@@ -270,6 +272,9 @@ def get_bones_relative_rotation(
             quat_array[fr_i, bone_i] = quat
 
     return quat_array
+
+
+def get_bone_local_facing(bone: bpy.types.Bone): return bone.tail - bone.head
 
 
 def add_keyframes(
@@ -562,9 +567,8 @@ def get_selected_bones(*armature: bpy.types.Object, fallback: Literal['all', 'vi
         if not isinstance(data, bpy.types.Armature):
             continue
         if bpy.context.mode == 'POSE':
-            pose = obj.pose
-            selected_bones = [bone for bone in pose.bones if bone.bone.select]
-        elif bpy.context.mode in ['OBJECT', 'EDIT_ARMATURE']:
+            selected_bones = [bone for bone in obj.pose.bones if bone.bone.select]
+        elif bpy.context.mode == 'EDIT_ARMATURE':
             selected_bones = [bone for bone in data.bones if bone.select]
         bones = [bone.name for bone in selected_bones]
         if len(bones) == 0:
@@ -725,10 +729,10 @@ def add_mapping(*armature: bpy.types.Object):
     armatures = get_armatures(*armature)
     active = None
     for arm in armatures:
-        if guess_mapping(arm, min_similar=0.5) != None:
-            if active is None:
-                active = arm
-            armatures.remove(arm)
+        guess, _ = guess_mapping(arm, min_similar=0.5)
+        if guess == 'smplx' and active is None:
+            active = arm
+        armatures.remove(arm)
     if active is None:
         Log.warning('Skip resort_from_BONES due to only select 1 armature. Try to select `SMPLX-...` as ACTIVE armature to resort BONES names smartly!')
     for arm in armatures:
@@ -794,6 +798,8 @@ def guess_mapping(armature: 'bpy.types.Object', min_similar=0.01) -> tuple[TYPE_
             max_similar = similar
             mapping = map
     Log.info(f'guess_mapping to: {mapping} of {armature.name=} with {max_similar=:.2f} > {min_similar=:.2f}')
+    if mapping not in ('smpl', 'smplx'):
+        Log.warning(f'Results may have errors if the rest pose of the MESH is NOT a T-pose when using {mapping=}')
     return mapping, max_similar
 
 
@@ -812,8 +818,8 @@ def get_slice(data: MotionData, Slice: slice):
     return Slice
 
 
-def get_bone_rotation_mode(armature: 'bpy.types.Object'):
-    bones_rots: list[TYPE_ROT] = [b.rotation_mode for b in armature.pose.bones]
+def get_bone_rotation_mode(armature: 'bpy.types.Object', bones: list[str]):
+    bones_rots: list[TYPE_ROT] = [b.rotation_mode for b in armature.pose.bones if b.name in bones]
     rot = get_major(bones_rots)
     rot = 'QUATERNION' if not rot else rot
     return rot
@@ -855,15 +861,12 @@ def data_mapping_name_Slice_transl_rotate(armature: bpy.types.Object, data: Moti
     return data, _mapping, name, Slice, transl, rotate
 
 
-def gen_FKtoIK():
-    from .libs import fk_to_ik
+def FKtoIK():
+    from .libs import gen_fk_to_ik
     armatures = get_armatures()
-    pg = Progress(len(armatures))
     for arm in armatures:
         bones = [b.name for b in arm.pose.bones if 'root' not in b.name]
-        fk_to_ik(arm.name, bones)
-        pg.update()
-        yield
+        GEN.append(gen_fk_to_ik(arm.name, bones))
 
 
 def gen_decimate(**kwargs):
@@ -968,7 +971,8 @@ def pose_apply(
         clean_th: -1 to disable,suggest 0.001~0.005; **keep default bezier curve handle ⚫**, clean nearby keyframes if `current-previous > threshold`; aims to remove time noise/tiny shake
         decimate_th: -1 to disable, suggest 0.001~0.1; **will modify curve handle ⚫→🔶**, decide to decimate current frame if `error=new-old < threshold`; aims to be editable
     """
-    rot = get_bone_rotation_mode(armature)
+    rot = get_bone_rotation_mode(armature, bones)
+    Log.debug(f'{rot=}')
     method = str(kwargs.get('rot', 0)).lower()
     method = method[0] if len(method) > 0 else ''
     if rot == 'QUATERNION':
@@ -989,7 +993,7 @@ def pose_apply(
             transl = transl - transl_base
             yield from add_keyframes(action, transl_base, frame, f'location', 'Object Transforms')
         pg_t = Progress(len(transl))
-        yield from add_keyframes(action, transl, frame, f'pose.bones["{bones[0]}"].location', bones[0], update=pg_t.update)
+        yield from add_keyframes(action, transl, frame, f'pose.bones["{bones[0]}"].location', bones[0], update=pg_t.update)  # root only have location
 
     bones = bones[1:] if bones[0] == 'root' else bones  # Skip root!
     # with progress_mouse(len(bones) * len(rots)) as update:

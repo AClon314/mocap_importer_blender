@@ -83,7 +83,8 @@ def add_bbox_plane(who: str, video_plane: bpy.types.Object):
 
 
 def get_or_add_video_plane(who: str, video: str | None, npz: str | None = None):
-    if (video_plane := bpy.context.active_object) and video_plane.type == 'MESH' and video_plane.name.startswith('video:'):
+    video_plane = bpy.context.active_object
+    if video_plane and video_plane.type == 'MESH' and video_plane.name.startswith('video:'):
         _w, _h = get_wh_by_node(video_plane)
     else:
         video_plane, _w, _h = add_video_plane(who, video, npz=npz)
