@@ -185,7 +185,7 @@ class TimerOperator(Operator, bpy.types.Operator):
     timer = None
 
     def modal(self, context, event):
-        if event.type == 'ESC' or event.type == 'PAUSE':
+        if not Progress.PAUSE() and (event.type == 'ESC' or event.type == 'PAUSE'):
             Progress.PAUSE(True)
         if event.type == 'TIMER':
             try:

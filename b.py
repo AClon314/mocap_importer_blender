@@ -107,14 +107,22 @@ def items_mapping(self=None, context=None):
     items: list[tuple[str, str, str]] = [(
         'auto', 'Auto', 'Auto detect armature type, based on majority bone names.')]
     Map.cache_clear()
+    no_help_filename = []
     for k, m in Map().items():
         help = ''
+        locale_key = bpy.app.translations.locale
+        if locale_key == 'zh_CN':
+            locale_key = 'zh_HANS'
+        elif locale_key == 'zh_TW':
+            locale_key = 'zh_HANT'
         try:
-            help = m.HELP[bpy.app.translations.locale]
+            help = m.HELP[locale_key]
         except Exception:
-            Log.warning(f'No help for {k}')
+            no_help_filename.append(k)
             help = m.__doc__ if m.__doc__ else ''
         items.append((k, k, help))
+    if no_help_filename:
+        Log.warning(f'No help for {bpy.app.translations.locale} on {no_help_filename}')
     return items
 
 
@@ -818,7 +826,7 @@ def get_slice(data: MotionData, Slice: slice):
     return Slice
 
 
-def get_bone_rotation_mode(armature: 'bpy.types.Object', bones: list[str]):
+def get_bone_rotation_mode(armature: 'bpy.types.Object', bones: Sequence[str]):
     bones_rots: list[TYPE_ROT] = [b.rotation_mode for b in armature.pose.bones if b.name in bones]
     rot = get_major(bones_rots)
     rot = 'QUATERNION' if not rot else rot
@@ -993,12 +1001,18 @@ def pose_apply(
             transl = transl - transl_base
             yield from add_keyframes(action, transl_base, frame, f'location', 'Object Transforms')
         pg_t = Progress(len(transl))
-        yield from add_keyframes(action, transl, frame, f'pose.bones["{bones[0]}"].location', bones[0], update=pg_t.update)  # root only have location
+        if len(transl) != len(rots):
+            Log.warning(f'Fallback to {len(rots)=}, != {len(transl)=}')
+    enum_bones = enumerate(bones[1:] if bones[0] == 'root' else bones)  # Skip root!
 
-    bones = bones[1:] if bones[0] == 'root' else bones  # Skip root!
-    # with progress_mouse(len(bones) * len(rots)) as update:
-    for i, B in enumerate(bones):
-        yield from add_keyframes(action, rots[:, i], frame, path.format(B), B, update=pg.update)
+    Log.debug(f'{len(rots)=}')
+    for i in range(len(rots)):
+        fi = frame + i
+        if transl is not None:
+            yield from add_keyframes(action, transl[i], fi, f'pose.bones["{bones[0]}"].location', bones[0], update=pg_t.update)  # root only have location
+        # with progress_mouse(len(bones) * len(rots)) as update:
+        for Bi, B in enum_bones:
+            yield from add_keyframes(action, rots[i, Bi], fi, path.format(B), B, update=pg.update)
     pose_reset(action, bones, rot)
 
 
