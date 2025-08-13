@@ -63,7 +63,7 @@ def gen_bbox(
 
 @copy_args(gen_bbox)  # type: ignore
 def bbox(*who: str, **kwargs):
-    whos, _ = props_filter(who=who)
+    whos = motions_items(who=who)
     for w in whos:
         GEN.append(gen_bbox(w, **kwargs))
 

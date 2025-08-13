@@ -41,13 +41,18 @@ def props_filter(who: Sequence[str], armature: bpy.types.Object | None = None, m
     armature = get_armatures()[0] if not armature else armature
     if mapping == 'auto':
         mapping, _ = guess_mapping(armature)
+    whos = motions_items(who)
+    return whos, armature, mapping
+
+
+def motions_items(who):
     if len(who) == 1 and who[0] == 'all':
         whos = [m[0] for m in items_motions()]
         whos.remove('all')  # remove 'all' option
         whos = [m for m in whos if 'cam@' not in m]
     else:
         whos = list(who)
-    return whos, armature, mapping
+    return whos
 
 
 @cache
@@ -1003,7 +1008,8 @@ def pose_apply(
         pg_t = Progress(len(transl))
         if len(transl) != len(rots):
             Log.warning(f'Fallback to {len(rots)=}, != {len(transl)=}')
-    enum_bones = enumerate(bones[1:] if bones[0] == 'root' else bones)  # Skip root!
+    bones = bones[1:] if bones[0] == 'root' else bones  # Skip root!
+    enum_bones = list(enumerate(bones))
 
     Log.debug(f'{len(rots)=}')
     for i in range(len(rots)):
