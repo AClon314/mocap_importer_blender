@@ -411,6 +411,38 @@ def get_similar(list1, list2):
     return ret
 
 
+def delta_quat(From: np.ndarray, To: np.ndarray):
+    '''计算给定2个欧拉角，旋转差值'''
+    from_unit = From / np.linalg.norm(From)
+    to_unit = To / np.linalg.norm(To)
+    cos_angle = np.dot(from_unit, to_unit)
+    rotate_axis = np.cross(from_unit, to_unit)  # dimension must be 2 or 3
+
+    angle = np.arccos(np.clip(cos_angle, -1.0, 1.0))
+    sin_2 = np.sin(angle / 2)
+    cos_2 = np.cos(angle / 2)
+    q = np.array([
+        cos_2, rotate_axis[0] * sin_2, rotate_axis[1] * sin_2, rotate_axis[2] * sin_2
+    ])  # TODO: figure out whether it's ok in math
+    return q / np.linalg.norm(q)
+
+
+def multi_quat(q1: np.ndarray, q2: np.ndarray):
+    '''apply in order like q2→q1→q_final, goto ask GPT for math explanation'''
+    w = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3]
+    x = q1[0] * q2[1] + q1[1] * q2[0] + q1[2] * q2[3] - q1[3] * q2[2]
+    y = q1[0] * q2[2] - q1[1] * q2[3] + q1[2] * q2[0] + q1[3] * q2[1]
+    z = q1[0] * q2[3] + q1[1] * q2[2] - q1[2] * q2[1] + q1[3] * q2[0]
+    return np.array([w, x, y, z])
+
+
+def quat_1(q: np.ndarray):
+    '''return quat^-1'''
+    w, x, y, z = q
+    norm_sq = w**2 + x**2 + y**2 + z**2
+    return np.array([w, -x, -y, -z]) / norm_sq
+
+
 def quat(xyz: np.ndarray) -> np.ndarray:
     """euler to quat
     Args:

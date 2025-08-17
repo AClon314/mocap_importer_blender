@@ -287,9 +287,6 @@ def get_bones_relative_rotation(
     return quat_array
 
 
-def get_bone_local_facing(bone: bpy.types.Bone): return bone.tail - bone.head
-
-
 def add_keyframes(
     action: 'bpy.types.Action',
     vectors: Sequence[float] | Vector,
@@ -959,7 +956,7 @@ def pose_reset(
         ZERO = [0, 0, 0]
         path = 'pose.bones["{}"].rotation_euler'
     for B in bones:
-        add_keyframes(action, ZERO, frame, path.format(B), B, 'CONSTANT')
+        yield from add_keyframes(action, ZERO, frame, path.format(B), B, 'CONSTANT')
     return action
 
 
@@ -1019,7 +1016,7 @@ def pose_apply(
         # with progress_mouse(len(bones) * len(rots)) as update:
         for Bi, B in enum_bones:
             yield from add_keyframes(action, rots[i, Bi], fi, path.format(B), B, update=pg.update)
-    pose_reset(action, bones, rot)
+    yield from pose_reset(action, bones, rot)
 
 
 def transform_apply(

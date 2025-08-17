@@ -42,57 +42,41 @@ def gvhmr(
     BODY = get_BONES(mapping=mapping, key='BODY')
     if not isinstance(armature.data, bpy.types.Armature):
         raise TypeError(f'Expected armature data type, got {type(armature.data)}')
-    torso = np.array(armature.matrix_world @ get_bone_local_facing(armature.data.bones[BODY[1]]))
-    Log.debug(f'{BODY[1]=}\t{torso=}')
-
-    # rotate[0] = [1, 0, 0, 0]   # no rotation
+    # torso = np.array(armature.matrix_world @ get_bone_local_facing(armature.data.bones[BODY[1]]))
+    # Log.debug(f'{BODY[1]=}\t{torso=}')
 
     if mapping not in ('smpl', 'smplx') and kwargs.get('offset', None):
-        rotate = pelvis_rotate_offset(rotate, torso)
+        ...
+        rotate = pelvis_rotate_offset(rotate, armature, BODY[1])
     rotate = rotate.reshape(-1, 1, rotate.shape[-1])
     pose = body_pose.value[Slice]
     pose = np.concatenate([rotate, pose], axis=1)  # (frames,1+22,3 or 4)
     with bpy_action(armature, name) as action:
         yield from pose_apply(armature=armature, action=action, pose=pose, transl=transl, bones=BODY, frame=data.begin + 1, transl_base=transl_base, **kwargs)
 
+# TODO: read source code of rokoko addon:
+# 1. copy To.bones → From.bones, new_bones in From use To.bones.name
+# 2. set new_bones' parent to From.bones.parent correspondently
+# 3. copy From.bones.head/tail/roll → From.new_bones.head/tail/roll
+# 4. set constrain on To.bones, target is From.new_bones, use COPY_ROTATION (+ COPY_LOCATION if root bones)
+# 5. bake To.bones
 
-def pelvis_rotate_offset(rotate, pelvis_before):
-    # TODO: read source code of rokoko addon
-    pelvis_before = pelvis_before / np.linalg.norm(pelvis_before)
-    pelvis_after = np.array([0, 0, 1])  # SMPL rot axis, normalized
-    rot_axis = np.cross(pelvis_before, pelvis_after)
-    rot_axis_norm = np.linalg.norm(rot_axis)
-    Log.debug(f'{rot_axis=}\t{rot_axis_norm=}')
-    # 计算需要应用的旋转四元数来抵消偏移
-    if rot_axis_norm > EPSILON:  # 避免除零错误
-        rot_axis = rot_axis / rot_axis_norm
-        angle = np.arccos(np.clip(np.dot(pelvis_before, pelvis_after), -1.0, 1.0))
-        # 构建四元数(w, x, y, z)
-        half_angle = angle / 2.0
-        s = np.sin(half_angle)
-        delta_rot = np.array([np.cos(half_angle), rot_axis[0] * s, rot_axis[1] * s, rot_axis[2] * s])
-        Log.debug(f'{delta_rot=}\t{angle=}')
-    else:
-        # 如果不需要旋转或180度旋转
-        if np.dot(pelvis_before, pelvis_after) > 0:
-            # 已经对齐，单位四元数
-            delta_rot = np.array([1.0, 0.0, 0.0, 0.0])
-        else:
-            # 相反方向，绕x轴旋转180度
-            delta_rot = np.array([0.0, 1.0, 0.0, 0.0])
 
-    is_3 = False
-    if rotate.shape[-1] == 3:
-        is_3 = True
-        rotate = quat(rotate)
-    if rotate.shape[-1] == 4:
-        # 将delta_rot扩展为与rotate相同的形状
-        delta_rot_expanded = np.tile(delta_rot, (rotate.shape[0], 1))
-        Log.debug(f'before{euler(rotate[0])=}')
-        rotate = quat_multiply(delta_rot_expanded, rotate)
-        Log.debug(f'after {euler(rotate[0])=}')
-    if is_3:
-        rotate = euler(rotate)
+def pelvis_rotate_offset(rotate: np.ndarray, armature: bpy.types.Object, torso_name='torso'):
+    '''Q_new_pose = Q_old_pose * Q_delta^-1'''
+    if not isinstance(armature.data, bpy.types.Armature):
+        raise TypeError(f'Expected armature data type, got {type(armature.data)}')
+    Log.error(f'{torso_name=}')
+    bone_torso = armature.data.bones[torso_name]
+    facing_torso = np.array(bone_torso.tail - bone_torso.head)
+    facing_torso = facing_torso / np.linalg.norm(facing_torso)
+    facing_pelvis = np.array([0, 0, 1])
+    Log.debug(f'{facing_torso=}\t{facing_pelvis=}')
+    delta_q = delta_quat(facing_torso, facing_pelvis)
+    Log.debug(f'{delta_q=}')
+    delta_q_1 = quat_1(delta_q)
+    for i in range(rotate.shape[0]):
+        rotate[i] = multi_quat(rotate[i], delta_q_1)
     return rotate
 
 
@@ -102,21 +86,26 @@ def get_bone_offset(From: bpy.types.Object, To: bpy.types.Object):
         raise TypeError(f'Expected armature type, got {type(From.data)=} and {type(To.data)=}')
     for bone in From.data.bones:
         transforms[bone.name] = (
-            From.matrix_world.inverted() @ bone.head.copy(),
-            From.matrix_world.inverted() @ bone.tail.copy(),
+            From.matrix_world.inverted() @ bone.head,
+            From.matrix_world.inverted() @ bone.tail,
             mat3_to_vec_roll(From.matrix_world.inverted().to_3x3() @ bone.matrix.to_3x3())
         )  # Head loc, tail loc, bone roll
-    return transforms
+    for item in self.retarget_bone_list:
+        bone_source = armature_source.data.edit_bones.get(item.bone_name_source)
+        # Recreate target bone
+        bone_new = armature_source.data.edit_bones.new(item.bone_name_target + RETARGET_ID)
+        bone_new.head, bone_new.tail, bone_new.roll = transforms[item.bone_name_target]
+        bone_new.parent = bone_source
 
 
 import math
 
 
-def mat3_to_vec_roll(mat):
-    vecmat = vec_roll_to_mat3(mat.col[1], 0)
+def mat3_to_vec_roll(M):
+    vecmat = vec_roll_to_mat3(M.col[1], 0)
     vecmatinv = vecmat.inverted()
-    rollmat = vecmatinv @ mat
-    roll = math.atan2(rollmat[0][2], rollmat[2][2])
+    M_roll = vecmatinv @ M
+    roll = math.atan2(M_roll[0][2], M_roll[2][2])
     return roll
 
 
