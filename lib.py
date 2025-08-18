@@ -1,6 +1,7 @@
 """
 lib.py is a share lib that not rely on bpy module, include basic data class and calculate functions.
 """
+
 import os
 import sys
 import importlib
@@ -9,37 +10,72 @@ import numpy as np
 from time import time
 from functools import cache
 from collections import UserDict
-from .logger import Log
 from types import ModuleType
-from typing import Callable, Dict, Generator, Iterable, ParamSpec, Sequence, Literal, TypeVar, cast, get_args
-INF = float('inf')
+from typing import (
+    Callable,
+    Dict,
+    Generator,
+    Iterable,
+    ParamSpec,
+    Sequence,
+    Literal,
+    TypeVar,
+    cast,
+    get_args,
+)
+
+try:
+    from .logger import Log
+except ImportError:
+    from logger import Log
+
+INF = float("inf")
 EPSILON = 1e-8  # 数值稳定系数
 DIR_SELF = os.path.dirname(__file__)
-DIR_MAPPING = os.path.join(DIR_SELF, 'mapping')
-MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, 'template.pyi')
-TYPE_MAPPING = Literal['smpl', 'smplx', 'rigify']
-TYPE_MAPPING_KEYS = Literal['BONES', 'BODY', 'HANDS', 'HEAD']
-TYPE_RUN = Literal['gvhmr', 'wilor']
+DIR_MAPPING = os.path.join(DIR_SELF, "mapping")
+MAPPING_TEMPLATE = os.path.join(DIR_MAPPING, "template.pyi")
+TYPE_MAPPING = Literal["smpl", "smplx", "rigify"]
+TYPE_MAPPING_KEYS = Literal["BONES", "BODY", "HANDS", "HEAD"]
+TYPE_RUN = Literal["gvhmr", "wilor"]
 _PS = ParamSpec("_PS")
 _TV = TypeVar("_TV")
-TYPE_PROP = Literal['body_pose', 'hand_pose', 'global_orient', 'betas', 'transl', 'bbox']
+TYPE_PROP = Literal[
+    "body_pose", "hand_pose", "global_orient", "betas", "transl", "bbox"
+]
 PROP_KEY = get_args(TYPE_PROP)
-def get_major(L: Sequence[_TV]) -> _TV | None: return max(L, key=L.count) if L else None
-def Axis(is_torch=False): return 'dim' if is_torch else 'axis'
+
+
+def get_major(L: Sequence[_TV]) -> _TV | None:
+    return max(L, key=L.count) if L else None
+
+
+def Axis(is_torch=False):
+    return "dim" if is_torch else "axis"
+
+
 @cache
-def Map(Dir='mapping') -> Dict[TYPE_MAPPING, ModuleType]: return Mod(Dir=Dir)   # type: ignore
+def Map(Dir="mapping") -> Dict[TYPE_MAPPING, ModuleType]:
+    return Mod(Dir=Dir)  # type: ignore
+
+
 @cache
-def Run(Dir='run') -> Dict[TYPE_RUN, ModuleType]: return Mod(Dir=Dir)   # type: ignore
+def Run(Dir="run") -> Dict[TYPE_RUN, ModuleType]:
+    return Mod(Dir=Dir)  # type: ignore
+
+
 # def cache(func: Callable[_PS, _TV]): return copy_args(func)(functools.cache(func))
 
 
 def copy_args(func: Callable[_PS, _TV]):
     """Decorator does nothing and returning the casted original function"""
-    def return_func(func: Callable[..., _TV]) -> Callable[_PS, _TV]: return cast(Callable[_PS, _TV], func)
+
+    def return_func(func: Callable[..., _TV]) -> Callable[_PS, _TV]:
+        return cast(Callable[_PS, _TV], func)
+
     return return_func
 
 
-def in_or_skip(part, full, pattern=''):
+def in_or_skip(part, full, pattern=""):
     """Check if `part` is in `full`, or if `part` is None/empty or `full` is None/empty`, return True. optionally Format-string with `pattern`."""
     if pattern:
         part = pattern.format(part) if part else None
@@ -51,41 +87,41 @@ def warn_or_return_first(L: list[_TV]) -> _TV:
     """Warn if more than one item in list, return the first item."""
     Len = len(L)
     if Len > 1:
-        Log.warning(f'{Len} > 1', extra={'report': True, 'mouse': False})
+        Log.warning(f"{Len} > 1", extra={"report": True, "mouse": False})
     return L[0]
 
 
 def format_sec(seconds: float):
     if seconds == INF:
-        return '⏳'
+        return "⏳"
     seconds = int(seconds)
     m, s = divmod(seconds, 60)
     return f"{s}s" if m == 0 else f"{m}:{s}"
 
 
-def Mod(Dir='mapping'):
+def Mod(Dir="mapping"):
     files = os.listdir(os.path.join(DIR_SELF, Dir))
     pys = []
     mods: Dict[str, ModuleType] = {}
     for f in files:
-        if f.endswith('.py') and f not in ['template.py', '__init__.py']:
+        if f.endswith(".py") and f not in ["template.py", "__init__.py"]:
             pys.append(f[:-3])
     for p in pys:
-        mod = importlib.import_module(f'.{Dir}.{p}', package=__package__)
+        mod = importlib.import_module(f".{Dir}.{p}", package=__package__)
         mods[p] = mod
     return mods
 
 
 def gen_calc():
-    '''
+    """
     Intensive computing tasks that can be paused. return True when tasks finished.
-    '''
+    """
     if Progress.PAUSE():
         return
     BATCH_SIZE = 1
     tick_prev = time()
     while True:
-        Log.debug(f'gen_calc {len(Progress.selves)=} {len(GEN.queue)=} {BATCH_SIZE=}')
+        Log.debug(f"gen_calc {len(Progress.selves)=} {len(GEN.queue)=} {BATCH_SIZE=}")
         try:
             for _ in range(BATCH_SIZE):
                 next(GEN.chain)
@@ -105,12 +141,29 @@ def gen_calc():
 class Generators:
     queue: list[Iterable] = []
     cache = None
-    def debug(self): Log.debug(f'Gens: {len(self.queue)=}\t{self.__dict__=}')
-    def insert(self, at=0, *gen: Generator): self.queue[at:at] = gen; self.cache = None
-    def append(self, *gen: Generator): self.queue.extend(gen); self.cache = None
-    def pop(self, at=-1): self.queue.pop(at); self.cache = None
-    def remove(self, *gen: Iterable): [self.queue.remove(g) for g in gen]; self.cache = None
-    def clear(self): self.queue.clear(); self.cache = None
+
+    def debug(self):
+        Log.debug(f"Gens: {len(self.queue)=}\t{self.__dict__=}")
+
+    def insert(self, at=0, *gen: Generator):
+        self.queue[at:at] = gen
+        self.cache = None
+
+    def append(self, *gen: Generator):
+        self.queue.extend(gen)
+        self.cache = None
+
+    def pop(self, at=-1):
+        self.queue.pop(at)
+        self.cache = None
+
+    def remove(self, *gen: Iterable):
+        [self.queue.remove(g) for g in gen]
+        self.cache = None
+
+    def clear(self):
+        self.queue.clear()
+        self.cache = None
 
     @property
     def chain(self):
@@ -125,45 +178,84 @@ class Generators:
 GEN = Generators()
 
 
-class Progress():
-    selves: list['Progress'] = []
+class Progress:
+    selves: list["Progress"] = []
     update_interval = 0.5
+
     @property
-    def _dur_change(self): return time() - self._tick_change
+    def _dur_change(self):
+        return time() - self._tick_change
+
     @property
-    def time(self): return time() - self.tick_start
+    def time(self):
+        return time() - self.tick_start
+
     @property
-    def active_time(self): return self._dur_run if self.pause else self._dur_run + self._dur_change
+    def active_time(self):
+        return self._dur_run if self.pause else self._dur_run + self._dur_change
+
     @property
-    def len(self): return self.Range.stop - self.Range.start
+    def len(self):
+        return self.Range.stop - self.Range.start
+
     @property
-    def done(self): return self._current - self.Range.start
+    def done(self):
+        return self._current - self.Range.start
+
     @property
-    def percent(self): return self.done / (self.len) if self.len != 0 else INF
+    def percent(self):
+        return self.done / (self.len) if self.len != 0 else INF
+
     @property
-    def rate(self): return self.done / self.active_time if self.active_time != 0 else INF
+    def rate(self):
+        return self.done / self.active_time if self.active_time != 0 else INF
+
     @property
-    def eta(self): return (self.Range.stop - self._current) / self.rate if self.rate != 0 else INF
+    def eta(self):
+        return (self.Range.stop - self._current) / self.rate if self.rate != 0 else INF
+
     @property
-    def out_range(self): return self._current < self.Range.start or self._current >= self.Range.stop
-    def status(self): return f'{self.percent:.0%},{format_sec(self.eta)},{self.rate:.1f}{self.unit}/s'
+    def out_range(self):
+        return self._current < self.Range.start or self._current >= self.Range.stop
+
+    def status(self):
+        return f"{self.percent:.0%},{format_sec(self.eta)},{self.rate:.1f}{self.unit}/s"
 
     @classmethod
-    def TIME(cls): return sum(s.time for s in cls.selves)
+    def TIME(cls):
+        return sum(s.time for s in cls.selves)
+
     @classmethod
-    def ACTIVE_TIME(cls): return sum(s.active_time for s in cls.selves)
+    def ACTIVE_TIME(cls):
+        return sum(s.active_time for s in cls.selves)
+
     @classmethod
-    def LEN(cls): return sum(s.len for s in cls.selves)
+    def LEN(cls):
+        return sum(s.len for s in cls.selves)
+
     @classmethod
-    def DONE(cls): return sum(s.done for s in cls.selves)
+    def DONE(cls):
+        return sum(s.done for s in cls.selves)
+
     @classmethod
-    def PERCENT(cls): return cls.DONE() / cls.LEN() if cls.LEN() != 0 else INF
+    def PERCENT(cls):
+        return cls.DONE() / cls.LEN() if cls.LEN() != 0 else INF
+
     @classmethod
-    def RATE(cls): return cls.DONE() / cls.ACTIVE_TIME() if cls.ACTIVE_TIME() != 0 else INF
+    def RATE(cls):
+        return cls.DONE() / cls.ACTIVE_TIME() if cls.ACTIVE_TIME() != 0 else INF
+
     @classmethod
-    def ETA(cls): return sum(s.eta for s in cls.selves)
+    def ETA(cls):
+        return sum(s.eta for s in cls.selves)
+
     @classmethod
-    def STATUS(cls): return f'{cls.PERCENT():.0%},{format_sec(cls.ETA())},{cls.RATE():.0f}/s' if cls.LEN() > 0 else ''
+    def STATUS(cls):
+        return (
+            f"{cls.PERCENT():.0%},{format_sec(cls.ETA())},{cls.RATE():.0f}/s"
+            if cls.LEN() > 0
+            else ""
+        )
 
     @classmethod
     def PAUSE(cls, set: bool | None = None):
@@ -174,11 +266,16 @@ class Progress():
         return set
 
     @property
-    def current(self): return self._current
+    def current(self):
+        return self._current
+
     @property
-    def pause(self): return self._pause
+    def pause(self):
+        return self._pause
+
     @current.setter
-    def current(self, value: int): self.update(set=value)
+    def current(self, value: int):
+        self.update(set=value)
 
     @pause.setter
     def pause(self, b: bool):
@@ -187,7 +284,7 @@ class Progress():
             self._dur_run += self._dur_change
         self._tick_change = time()
 
-    def __init__(self, *Range: int, unit: str = 'frame', msg='', pause=False):
+    def __init__(self, *Range: int, unit: str = "frame", msg="", pause=False):
         self.Range = range(*Range) if Range else range(100)
         self.msg = msg
         self.unit = unit
@@ -204,7 +301,11 @@ class Progress():
             set: Any value between min and max as set in Range=...
         """
         if self.out_range:
-            self.__class__.selves.remove(self) if self in self.__class__.selves else None
+            (
+                self.__class__.selves.remove(self)
+                if self in self.__class__.selves
+                else None
+            )
             return self._current
         if set is not None:
             self._current = set
@@ -231,9 +332,14 @@ class MotionData(UserDict):
     ```
     """
 
-    def keys(self) -> list[str]: return list(super().keys())
-    def values(self) -> list[np.ndarray]: return list(super().values())
-    def __bool__(self): return bool(self.keys())
+    def keys(self) -> list[str]:
+        return list(super().keys())
+
+    def values(self) -> list[np.ndarray]:
+        return list(super().values())
+
+    def __bool__(self):
+        return bool(self.keys())
 
     def __init__(self, /, *args, npz: str | None = None, lazy=False, **kwargs):
         """
@@ -259,12 +365,12 @@ class MotionData(UserDict):
         # Log.debug(f'self.__dict__={self.__dict__}')
         MD = MotionData(npz=self.npz, lazy=True)
         if isinstance(who, int):
-            who = f'person{who}'
+            who = f"person{who}"
         if Slice:
             self.Slice = Slice
 
         for k, v in self.items():
-            is_in = [in_or_skip(args, k, ';{};') for args in [mapping, run, who, *prop]]
+            is_in = [in_or_skip(args, k, ";{};") for args in [mapping, run, who, *prop]]
             is_in = all(is_in)
             if is_in:
                 MD[k] = v
@@ -279,20 +385,27 @@ class MotionData(UserDict):
         """
         L: list[str] = []
         for k in self.keys():
-            keys = k.split(';')
+            keys = k.split(";")
             col_name = keys[col_num]
             if col_name not in L:
                 L.append(col_name)
         return L
 
     @property
-    def mappings(self) -> list[TYPE_MAPPING]: return self.distinct(0)  # type: ignore
+    def mappings(self) -> list[TYPE_MAPPING]:
+        return self.distinct(0)  # type: ignore
+
     @property
-    def runs(self) -> list[TYPE_RUN]: return self.distinct(1)   # type: ignore
+    def runs(self) -> list[TYPE_RUN]:
+        return self.distinct(1)  # type: ignore
+
     @property
-    def whos(self): return self.distinct(2)
+    def whos(self):
+        return self.distinct(2)
+
     @property
-    def begins(self): return [int(x) for x in self.distinct(3)]
+    def begins(self):
+        return [int(x) for x in self.distinct(3)]
 
     def props(self, col=0):
         """
@@ -304,14 +417,23 @@ class MotionData(UserDict):
     # def coords(self): return self.distinct(4)
 
     @property
-    def mapping(self): return warn_or_return_first(self.mappings)
+    def mapping(self):
+        return warn_or_return_first(self.mappings)
+
     @property
-    def run(self): return warn_or_return_first(self.runs)
+    def run(self):
+        return warn_or_return_first(self.runs)
+
     @property
-    def who(self): return warn_or_return_first(self.whos)
+    def who(self):
+        return warn_or_return_first(self.whos)
+
     @property
-    def begin(self): return warn_or_return_first(self.begins)
-    def prop(self, col=0): return self.props(col)[0]
+    def begin(self):
+        return warn_or_return_first(self.begins)
+
+    def prop(self, col=0):
+        return self.props(col)[0]
 
     @property
     def value(self):
@@ -335,7 +457,7 @@ class MotionData(UserDict):
         return self.keys()[0]
 
 
-def log_array(arr: np.ndarray | list, name='ndarray'):
+def log_array(arr: np.ndarray | list, name="ndarray"):
     def recursive_convert(array):
         if isinstance(array, np.ndarray):
             return array.tolist()
@@ -346,7 +468,7 @@ def log_array(arr: np.ndarray | list, name='ndarray'):
 
     def array_to_str(array):
         if isinstance(array, list):
-            return '\t'.join(array_to_str(item) for item in array)
+            return "\t".join(array_to_str(item) for item in array)
         else:
             return str(array)
 
@@ -355,7 +477,7 @@ def log_array(arr: np.ndarray | list, name='ndarray'):
 
     array = recursive_convert(arr.tolist())
     array = array_to_str(array)
-    text = f'{name}={array}'
+    text = f"{name}={array}"
     Log.debug(text)
     print()
     return text
@@ -367,7 +489,11 @@ def bone_to_dict(bone, whitelist: Sequence[str] | None = None):
     Args:
         whitelist (Sequence[str], optional): list of bone names to include. Defaults to None.
     """
-    return {child.name: bone_to_dict(child) for child in bone.children if in_or_skip(child.name, whitelist)}
+    return {
+        child.name: bone_to_dict(child)
+        for child in bone.children
+        if in_or_skip(child.name, whitelist)
+    }
 
 
 def keys_BFS(d: dict, wrap=False, whitelist: Sequence[str] | None = None):
@@ -390,7 +516,9 @@ def keys_BFS(d: dict, wrap=False, whitelist: Sequence[str] | None = None):
         next_queue = []
         for current_dict in Q:
             current_level.extend(current_dict.keys())  # 收集当前字典的所有键到当前层级
-            next_queue.extend(current_dict.values())  # 收集当前字典的所有子字典到下一层队列
+            next_queue.extend(
+                current_dict.values()
+            )  # 收集当前字典的所有子字典到下一层队列
         current_level = [k for k in current_level if in_or_skip(k, whitelist)]
         ret.append(current_level) if wrap else ret.extend(current_level)
         Q = next_queue  # 更新队列为下一层级的子字典列表
@@ -411,36 +539,105 @@ def get_similar(list1, list2):
     return ret
 
 
-def delta_quat(From: np.ndarray, To: np.ndarray):
-    '''计算给定2个欧拉角，旋转差值'''
-    from_unit = From / np.linalg.norm(From)
-    to_unit = To / np.linalg.norm(To)
+def delta_quat(v_from: np.ndarray, v_to: np.ndarray) -> np.ndarray:
+    """计算给定2个欧拉角，旋转差值"""
+    from_unit = v_from / np.linalg.norm(v_from)
+    to_unit = v_to / np.linalg.norm(v_to)
     cos_angle = np.dot(from_unit, to_unit)
-    rotate_axis = np.cross(from_unit, to_unit)  # dimension must be 2 or 3
 
-    angle = np.arccos(np.clip(cos_angle, -1.0, 1.0))
+    # 如果向量方向相同
+    if cos_angle > 0.9999:
+        return np.array([1.0, 0.0, 0.0, 0.0])
+
+    # 如果向量方向相反
+    if cos_angle < -0.9999:
+        # 找到一个垂直于from_unit的向量作为旋转轴
+        if abs(from_unit[0]) < abs(from_unit[1]):
+            if abs(from_unit[0]) < abs(from_unit[2]):
+                axis = np.array([1.0, 0.0, 0.0])
+            else:
+                axis = np.array([0.0, 0.0, 1.0])
+        else:
+            if abs(from_unit[1]) < abs(from_unit[2]):
+                axis = np.array([0.0, 1.0, 0.0])
+            else:
+                axis = np.array([0.0, 0.0, 1.0])
+
+        rotate_axis = np.cross(from_unit, axis)
+        rotate_axis = rotate_axis / np.linalg.norm(rotate_axis)
+        angle = np.pi
+    else:
+        rotate_axis = np.cross(from_unit, to_unit)
+        rotate_axis_norm = np.linalg.norm(rotate_axis)
+        if rotate_axis_norm > 1e-8:
+            rotate_axis = rotate_axis / rotate_axis_norm
+        else:
+            rotate_axis = np.array([1.0, 0.0, 0.0])  # 默认轴
+        angle = np.arccos(np.clip(cos_angle, -1.0, 1.0))
+
     sin_2 = np.sin(angle / 2)
     cos_2 = np.cos(angle / 2)
-    q = np.array([
-        cos_2, rotate_axis[0] * sin_2, rotate_axis[1] * sin_2, rotate_axis[2] * sin_2
-    ])  # TODO: figure out whether it's ok in math
+    q = np.array(
+        [cos_2, rotate_axis[0] * sin_2, rotate_axis[1] * sin_2, rotate_axis[2] * sin_2]
+    )
     return q / np.linalg.norm(q)
 
 
-def multi_quat(q1: np.ndarray, q2: np.ndarray):
-    '''apply in order like q2→q1→q_final, goto ask GPT for math explanation'''
-    w = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3]
-    x = q1[0] * q2[1] + q1[1] * q2[0] + q1[2] * q2[3] - q1[3] * q2[2]
-    y = q1[0] * q2[2] - q1[1] * q2[3] + q1[2] * q2[0] + q1[3] * q2[1]
-    z = q1[0] * q2[3] + q1[1] * q2[2] - q1[2] * q2[1] + q1[3] * q2[0]
-    return np.array([w, x, y, z])
-
-
 def quat_1(q: np.ndarray):
-    '''return quat^-1'''
+    """return quat^-1"""
     w, x, y, z = q
     norm_sq = w**2 + x**2 + y**2 + z**2
     return np.array([w, -x, -y, -z]) / norm_sq
+
+
+def _raw_multi_quat(q1: np.ndarray, q2: np.ndarray):
+    """apply in order like q2→q1→q_final, goto ask GPT for math explanation"""
+    w = (
+        q1[..., 0] * q2[..., 0]
+        - q1[..., 1] * q2[..., 1]
+        - q1[..., 2] * q2[..., 2]
+        - q1[..., 3] * q2[..., 3]
+    )
+    x = (
+        q1[..., 0] * q2[..., 1]
+        + q1[..., 1] * q2[..., 0]
+        + q1[..., 2] * q2[..., 3]
+        - q1[..., 3] * q2[..., 2]
+    )
+    y = (
+        q1[..., 0] * q2[..., 2]
+        - q1[..., 1] * q2[..., 3]
+        + q1[..., 2] * q2[..., 0]
+        + q1[..., 3] * q2[..., 1]
+    )
+    z = (
+        q1[..., 0] * q2[..., 3]
+        + q1[..., 1] * q2[..., 2]
+        - q1[..., 2] * q2[..., 1]
+        + q1[..., 3] * q2[..., 0]
+    )
+    return np.stack([w, x, y, z], axis=-1)
+
+
+def multi_quat(*q: np.ndarray):
+    """apply order: q4=q1←q2←q3"""
+    if not q:
+        raise ValueError("At least 1 quaternion must be provided.")
+    result = q[0]
+    for i, quat in enumerate(q[1:]):
+        if quat.shape[-1] != 4:
+            raise ValueError(
+                f"q{i+1} must have shape (..., 4), but got {quat.shape}. {dict((i,_q.shape) for i,_q in enumerate(q))}"
+            )
+        result = _raw_multi_quat(quat, result)
+    return result
+
+
+def change_coord(q_old: np.ndarray, v_from: np.ndarray, v_to: np.ndarray):
+    """usage: new_torso_rotate = change_coord(old_pelvis_rotate, [0,0,1], [0,1,0]) # smplx to others like rigify"""
+    q_delta = delta_quat(v_from, v_to)
+    q_d1 = quat_1(q_delta)
+    return multi_quat(q_delta, q_old, q_d1)
 
 
 def quat(xyz: np.ndarray) -> np.ndarray:
@@ -454,7 +651,7 @@ def quat(xyz: np.ndarray) -> np.ndarray:
         return xyz
     assert xyz.shape[-1] == 3, f"Last dimension should be 3, but found {xyz.shape}"
     lib = Lib(xyz)  # 自动检测库类型
-    is_torch = lib.__name__ == 'torch'
+    is_torch = lib.__name__ == "torch"
 
     # 计算半角三角函数（支持广播）
     half_angles = 0.5 * xyz
@@ -492,7 +689,7 @@ def euler(wxyz: np.ndarray) -> np.ndarray:
         return wxyz
     assert wxyz.shape[-1] == 4, f"Last dimension should be 4, but found {wxyz.shape}"
     lib = Lib(wxyz)  # 自动检测库类型
-    is_torch = lib.__name__ == 'torch'
+    is_torch = lib.__name__ == "torch"
 
     # 归一化四元数（防止输入未归一化）
     wxyz = wxyz / Norm(wxyz, dim=-1, keepdim=True)  # type: ignore
@@ -527,7 +724,12 @@ def get_mod(mod1: ModuleType | str):
     return _mod1
 
 
-def Lib(arr, mod1: ModuleType | str = np, mod2: ModuleType | str = 'torch', ret_1_if=np.ndarray):
+def Lib(
+    arr,
+    mod1: ModuleType | str = np,
+    mod2: ModuleType | str = "torch",
+    ret_1_if=np.ndarray,
+):
     """usage:
     ```python
     lib = Lib(arr)
@@ -562,7 +764,7 @@ def quat_multiply(q1, q2):
 def Norm(arr: np.ndarray, dim: int = -1, keepdim: bool = True) -> np.ndarray:
     """计算范数，支持批量输入"""
     lib = Lib(arr)
-    is_torch = lib.__name__ == 'torch'
+    is_torch = lib.__name__ == "torch"
     if is_torch:
         return lib.norm(arr, dim=dim, keepdim=keepdim)
     else:
@@ -572,7 +774,7 @@ def Norm(arr: np.ndarray, dim: int = -1, keepdim: bool = True) -> np.ndarray:
 def skew_symmetric(v: np.ndarray) -> np.ndarray:
     """生成反对称矩阵，支持批量输入"""
     lib = Lib(v)
-    is_torch = lib.__name__ == 'torch'
+    is_torch = lib.__name__ == "torch"
     axis = Axis(is_torch)
     axis_1 = {axis: -1}
     # 创建各分量
@@ -606,9 +808,11 @@ def Rodrigues(rot_vec3: np.ndarray) -> np.ndarray:
     """
     if rot_vec3.shape[-1] == 4:
         return rot_vec3
-    assert rot_vec3.shape[-1] == 3, f"Last dimension must be 3, but got {rot_vec3.shape}"
+    assert (
+        rot_vec3.shape[-1] == 3
+    ), f"Last dimension must be 3, but got {rot_vec3.shape}"
     lib = Lib(rot_vec3)
-    is_torch = lib.__name__ == 'torch'
+    is_torch = lib.__name__ == "torch"
 
     # 计算旋转角度
     theta = Norm(rot_vec3, dim=-1, keepdim=True)  # (...,1)
@@ -651,18 +855,21 @@ def rotMat_to_quat(R: np.ndarray) -> np.ndarray:
         return R
     assert R.shape[-2:] == (3, 3), f"输入R的末两维必须为3x3，当前为{R.shape}"
     lib = Lib(R)  # 自动检测模块
-    is_torch = lib.__name__ == 'torch'
+    is_torch = lib.__name__ == "torch"
 
     # 计算迹，形状为(...)
-    trace = lib.einsum('...ii->...', R)
+    trace = lib.einsum("...ii->...", R)
 
     # 计算四个分量的平方（带数值稳定处理）
-    q_sq = lib.stack([
-        (trace + 1) / 4,
-        (1 + 2 * R[..., 0, 0] - trace) / 4,
-        (1 + 2 * R[..., 1, 1] - trace) / 4,
-        (1 + 2 * R[..., 2, 2] - trace) / 4,
-    ], axis=-1)
+    q_sq = lib.stack(
+        [
+            (trace + 1) / 4,
+            (1 + 2 * R[..., 0, 0] - trace) / 4,
+            (1 + 2 * R[..., 1, 1] - trace) / 4,
+            (1 + 2 * R[..., 2, 2] - trace) / 4,
+        ],
+        axis=-1,
+    )
 
     q_sq = lib.maximum(q_sq, 0.0)  # 确保平方值非负
 
@@ -717,7 +924,8 @@ def rotMat_to_quat(R: np.ndarray) -> np.ndarray:
     return ret
 
 
-def quat_rotAxis(arr: np.ndarray) -> np.ndarray: return rotMat_to_quat(Rodrigues(arr))
+def quat_rotAxis(arr: np.ndarray) -> np.ndarray:
+    return rotMat_to_quat(Rodrigues(arr))
 
 
 def quat_to_rotMat(quats):
@@ -729,11 +937,13 @@ def quat_to_rotMat(quats):
     w, x, y, z = arr.T  # 每个分量形状为 (N,)
 
     # 构建旋转矩阵
-    R = np.array([
-        [1 - 2 * y**2 - 2 * z**2, 2 * x * y - 2 * w * z, 2 * x * z + 2 * w * y],
-        [2 * x * y + 2 * w * z, 1 - 2 * x**2 - 2 * z**2, 2 * y * z - 2 * w * x],
-        [2 * x * z - 2 * w * y, 2 * y * z + 2 * w * x, 1 - 2 * x**2 - 2 * y**2]
-    ])  # R.shape == (3, 3, N)
+    R = np.array(
+        [
+            [1 - 2 * y**2 - 2 * z**2, 2 * x * y - 2 * w * z, 2 * x * z + 2 * w * y],
+            [2 * x * y + 2 * w * z, 1 - 2 * x**2 - 2 * z**2, 2 * y * z - 2 * w * x],
+            [2 * x * z - 2 * w * y, 2 * y * z + 2 * w * x, 1 - 2 * x**2 - 2 * y**2],
+        ]
+    )  # R.shape == (3, 3, N)
 
     R = R.transpose(2, 0, 1)  # (N, 3, 3)
     return R.reshape(*original_shape[:-1], 3, 3)  # (..., 3, 3)
@@ -753,17 +963,21 @@ def euler_to_rotMat(eulers):
     cos_y = np.cos(yaw)
     sin_y = np.sin(yaw)
 
-    R = np.array([
-        [cos_y * cos_p,
-         cos_y * sin_p * sin_r - sin_y * cos_r,
-         cos_y * sin_p * cos_r + sin_y * sin_r],
-        [sin_y * cos_p,
-         sin_y * sin_p * sin_r + cos_y * cos_r,
-         sin_y * sin_p * cos_r - cos_y * sin_r],
-        [-sin_p,
-         cos_p * sin_r,
-         cos_p * cos_r]
-    ])  # R.shape == (3, 3, N)
+    R = np.array(
+        [
+            [
+                cos_y * cos_p,
+                cos_y * sin_p * sin_r - sin_y * cos_r,
+                cos_y * sin_p * cos_r + sin_y * sin_r,
+            ],
+            [
+                sin_y * cos_p,
+                sin_y * sin_p * sin_r + cos_y * cos_r,
+                sin_y * sin_p * cos_r - cos_y * sin_r,
+            ],
+            [-sin_p, cos_p * sin_r, cos_p * cos_r],
+        ]
+    )  # R.shape == (3, 3, N)
 
     R = R.transpose(2, 0, 1)  # (N, 3, 3)
     return R.reshape(*original_shape[:-1], 3, 3)  # (..., 3, 3)
@@ -780,9 +994,9 @@ def rotMat(arr: np.ndarray):
 
 
 def mano_to_smplx(
-    body_pose: 'np.ndarray',
-    hand_pose: 'np.ndarray',
-    global_orient: 'np.ndarray',
+    body_pose: "np.ndarray",
+    hand_pose: "np.ndarray",
+    global_orient: "np.ndarray",
     base_frame=0,
     is_left=False,
     left_fix=False,
@@ -805,8 +1019,8 @@ def mano_to_smplx(
         - wrist_pose (np.array): SMPLX's local pose (3 or 4), re-calculate based on `body_write` & hans's `global_orient`
         - hand_pose (np.array): SMPLX's local pose (15, 3 or 4), mirrored if is_left
     """
-    Log.debug(f'{body_pose.shape=}')
-    Log.debug(f'{global_orient.shape=}')
+    Log.debug(f"{body_pose.shape=}")
+    Log.debug(f"{global_orient.shape=}")
 
     M = np.diag([-1, 1, 1])  # Preparing for the left hand switch
     global_orient = rotMat(global_orient)
@@ -825,19 +1039,19 @@ def mano_to_smplx(
     if body_elbow.shape[0] < global_orient.shape[0]:
         # body < hand, padding body from the last frame
         pad_size = global_orient.shape[0] - body_elbow.shape[0]
-        body_elbow = np.pad(body_elbow, ((0, pad_size), (0, 0), (0, 0)), mode='edge')
+        body_elbow = np.pad(body_elbow, ((0, pad_size), (0, 0), (0, 0)), mode="edge")
     else:
         # body > hand, clip body
-        body_elbow = body_elbow[:global_orient.shape[0]]
+        body_elbow = body_elbow[: global_orient.shape[0]]
 
     wrist_pose = np.linalg.inv(body_elbow) @ global_orient
     wrist_pose = rotMat_relative(wrist_pose, base_frame=base_frame)
     wrist_pose = rotMat_to_quat(wrist_pose)
-    Log.debug(f'{wrist_pose.shape=}')
+    Log.debug(f"{wrist_pose.shape=}")
     return wrist_pose, hand_pose
 
 
-def rotMat_relative(rotMats: 'np.ndarray', base_frame=0):
+def rotMat_relative(rotMats: "np.ndarray", base_frame=0):
     """
     重新计算相对于指定帧的相对旋转
 

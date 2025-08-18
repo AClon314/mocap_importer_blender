@@ -15,11 +15,5 @@ PR welcome! (ゝ∀･)
 - remember which .npz for each armature
 
 draft, done partly, not perfect:
-- bones remapping to UE Mannequin (external rokoko addon)
-  - auto T-pose by mesh, then apply modifier with keeping shape key, then rokoko retargeting
-- bbox viewer
 - [track camera from gvhmr](https://github.com/zju3dv/GVHMR/issues/30)
 - make wilor predict hands ID continuously
-- Import all motion:
-  - at 0 frame/at begin_frame(described in npz)
-  - on same person/ auto new person

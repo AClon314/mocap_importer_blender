@@ -22,8 +22,11 @@ bl_info = {
     "category": "Animation",
 }
 import bpy
-from . import auto_load, libs, b
-auto_load.init()
+
+if __name__.startswith("bl_ext"):
+    from . import auto_load, libs, b
+
+    auto_load.init()
 
 
 def register():
