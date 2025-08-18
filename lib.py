@@ -590,8 +590,8 @@ def quat_1(q: np.ndarray):
     return np.array([w, -x, -y, -z]) / norm_sq
 
 
-def _raw_multi_quat(q1: np.ndarray, q2: np.ndarray):
-    """apply in order like q2→q1→q_final, goto ask GPT for math explanation"""
+def quat_multi(q1: np.ndarray, q2: np.ndarray):
+    """apply in order like q1→q2→q_final, goto ask GPT for math explanation"""
     w = (
         q1[..., 0] * q2[..., 0]
         - q1[..., 1] * q2[..., 1]
@@ -619,8 +619,8 @@ def _raw_multi_quat(q1: np.ndarray, q2: np.ndarray):
     return np.stack([w, x, y, z], axis=-1)
 
 
-def multi_quat(*q: np.ndarray):
-    """apply order: q4=q1←q2←q3"""
+def multi_quats(*q: np.ndarray):
+    """apply order: q4=q3←q2←q1"""
     if not q:
         raise ValueError("At least 1 quaternion must be provided.")
     result = q[0]
@@ -629,7 +629,7 @@ def multi_quat(*q: np.ndarray):
             raise ValueError(
                 f"q{i+1} must have shape (..., 4), but got {quat.shape}. {dict((i,_q.shape) for i,_q in enumerate(q))}"
             )
-        result = _raw_multi_quat(quat, result)
+        result = quat_multi(quat, result)
     return result
 
 
@@ -637,7 +637,7 @@ def change_coord(q_old: np.ndarray, v_from: np.ndarray, v_to: np.ndarray):
     """usage: new_torso_rotate = change_coord(old_pelvis_rotate, [0,0,1], [0,1,0]) # smplx to others like rigify"""
     q_delta = delta_quat(v_from, v_to)
     q_d1 = quat_1(q_delta)
-    return multi_quat(q_delta, q_old, q_d1)
+    return multi_quats(q_delta, q_old, q_d1)
 
 
 def quat(xyz: np.ndarray) -> np.ndarray:
@@ -748,17 +748,6 @@ def Lib(
         raise ImportError("Both libraries are not available.")
     # Log.debug(f"🔍 {mod.__name__}")
     return mod
-
-
-def quat_multiply(q1, q2):
-    w1, x1, y1, z1 = q1[..., 0], q1[..., 1], q1[..., 2], q1[..., 3]
-    w2, x2, y2, z2 = q2[..., 0], q2[..., 1], q2[..., 2], q2[..., 3]
-    result = Lib(q1).empty_like(q1)
-    result[..., 0] = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2  # w
-    result[..., 1] = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2  # x
-    result[..., 2] = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2  # y
-    result[..., 3] = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2  # z
-    return result
 
 
 def Norm(arr: np.ndarray, dim: int = -1, keepdim: bool = True) -> np.ndarray:
