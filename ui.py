@@ -3,33 +3,76 @@
 import os
 import bpy
 from bpy_extras.io_utils import ImportHelper, ExportHelper
-from .b import fit_bbox, FKtoIK, add_mapping, gen_decimate, get_active_selected_objs, guess_mapping, load_data, items_motions, items_mapping, get_bones_info, apply
+from .b import (
+    fit_bbox,
+    FKtoIK,
+    add_mapping,
+    gen_decimate,
+    get_active_selected_objs,
+    guess_mapping,
+    load_data,
+    items_motions,
+    items_mapping,
+    get_bones_info,
+    apply,
+)
 from .logger import _PKG_
 from .lib import DIR_MAPPING, DIR_SELF, Progress, GEN, gen_calc, Log
 from .bbox import bbox
-VIDEO_EXT = "webm,mkv,flv,flv,vob,vob,ogv,ogg,drc,gifv,webm,gifv,mng,avi,mov,qt,wmv,yuv,rm,rmvb,viv,asf,amv,mp4,m4p,m4v,mpg,mp2,mpeg,mpe,mpv,mpg,mpeg,m2v,m4v,svi,3gp,3g2,mxf,roq,nsv,flv,f4v,f4p,f4a,f4b".split(',')
-BL_ID = 'MOCAP_PT_Panel'
-BL_CATAGORY = 'Animation'
-BL_SPACE = 'VIEW_3D'
-BL_REGION = 'UI'
-BL_CONTEXT = 'objectmode'
-_EXPORT_PY = os.path.join(DIR_SELF, 'export.py')
-def Props(context: bpy.types.Context) -> 'Mocap_PropsGroup': return context.scene.mocap_importer   # type: ignore
-def Layout(self: 'bpy.types.Panel') -> 'bpy.types.UILayout': return self.layout
-def Eval(self, context): return eval(self.debug_eval)
-def register(): bpy.types.Scene.mocap_importer = bpy.props.PointerProperty(type=Mocap_PropsGroup)   # type: ignore
-def unregister(): del bpy.types.Scene.mocap_importer    # type: ignore
-def ui_to_b_kwargs(p: 'Mocap_PropsGroup'): return dict(mapping=p.mapping, keep_end=p.keep_end, base_frame=p.base_frame, clean_th=p.clean_th, decimate_th=p.decimate_th, **eval(f'dict({p.debug_kwargs})'))
+
+VIDEO_EXT = "webm,mkv,flv,flv,vob,vob,ogv,ogg,drc,gifv,webm,gifv,mng,avi,mov,qt,wmv,yuv,rm,rmvb,viv,asf,amv,mp4,m4p,m4v,mpg,mp2,mpeg,mpe,mpv,mpg,mpeg,m2v,m4v,svi,3gp,3g2,mxf,roq,nsv,flv,f4v,f4p,f4a,f4b".split(
+    ","
+)
+BL_ID = "MOCAP_PT_Panel"
+BL_CATAGORY = "Animation"
+BL_SPACE = "VIEW_3D"
+BL_REGION = "UI"
+BL_CONTEXT = "objectmode"
+BPY_OPS = "bpy.ops."
+F1_HELP = "https://github.com/AClon314/mocap_importer_blender"
+_EXPORT_PY = os.path.join(DIR_SELF, "export.py")
+
+
+def Props(context: bpy.types.Context) -> "Mocap_PropsGroup":
+    return context.scene.mocap_importer  # type: ignore
+
+
+def Layout(self: "bpy.types.Panel") -> "bpy.types.UILayout":
+    return self.layout  # type: ignore
+
+
+def Eval(self, context):
+    return eval(self.debug_eval)
+
+
+def register():
+    bpy.types.Scene.mocap_importer = bpy.props.PointerProperty(type=Mocap_PropsGroup)  # type: ignore
+
+
+def unregister():
+    del bpy.types.Scene.mocap_importer  # type: ignore
+
+
+def ui_to_b_kwargs(p: "Mocap_PropsGroup"):
+    return dict(
+        mapping=p.mapping,
+        keep_end=p.keep_end,
+        base_frame=p.base_frame,
+        clean_th=p.clean_th,
+        decimate_th=p.decimate_th,
+        **eval(f"dict({p.debug_kwargs})"),
+    )
 
 
 def execute(func):
     """bpy.Operator: `self.report()` and cache_clear()"""
 
     def wrap(self, context: bpy.types.Context):
-        setattr(Log, 'report', self.report)
+        setattr(Log, "report", self.report)
         ret = func(self, context)
         guess_mapping.cache_clear()
         return ret
+
     return wrap
 
 
@@ -45,29 +88,33 @@ class ExpandedPanel(DefaultPanel):
 
 
 class MAIN_PT_Panel(ExpandedPanel, bpy.types.Panel):
-    bl_label = ''
-    _bl_label = 'Motion tracking tools'
+    bl_label = ""
+    _bl_label = "Motion tracking tools"
     bl_description = _PKG_
     bl_idname = BL_ID
+
     def draw(self, context): ...
 
     def draw_header(self, context):
         layout = Layout(self)
         row = layout.row(align=True)
-        row.label(icon='OUTLINER_OB_ARMATURE', text=self._bl_label if Progress.LEN() == 0 else '')
+        row.label(
+            icon="OUTLINER_OB_ARMATURE",
+            text=self._bl_label if Progress.LEN() == 0 else "",
+        )
         if Progress.LEN() > 0:
-            row.progress(factor=Progress.PERCENT(), type='RING')
+            row.progress(factor=Progress.PERCENT(), type="RING")
             if Progress.PAUSE():
-                row.operator('mocap.continue', icon='PLAY', text='')
+                row.operator("mocap.continue", icon="PLAY", text="")
             else:
-                row.operator('mocap.pause', icon='PAUSE', text='')
-            row.operator('mocap.cancel', icon='CANCEL', text='')
+                row.operator("mocap.pause", icon="PAUSE", text="")
+            row.operator("mocap.cancel", icon="CANCEL", text="")
             row.label(text=Progress.STATUS())
-        row.operator('mocap.start_task_queue', icon='PLAY', text='')
+        row.operator("mocap.start_task_queue", icon="PLAY", text="")
 
 
 class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
-    bl_label = 'Import'
+    bl_label = "Import"
     bl_parent_id = BL_ID
 
     def draw(self, context):
@@ -75,26 +122,30 @@ class IMPORT_PT_Panel(ExpandedPanel, bpy.types.Panel):
         props = Props(context)
         col = layout.column(align=True)
         row = col.row(align=True)
-        row.prop(props, 'input_file', icon='FILE_MOVIE', text='')
-        row.operator('mocap.load_file', icon='FILE_FOLDER', text='')
-        col.prop(props, 'motions', icon='ACTION', text='')
+        row.prop(props, "input_file", icon="FILE_MOVIE", text="")
+        row.operator("mocap.load_file", icon="FILE_FOLDER", text="")
+        col.prop(props, "motions", icon="ACTION", text="")
         row = col.row(align=True)
-        row.operator('mocap.bbox', icon='SHADING_BBOX') if 'cam' not in props.motions else None  # TODO: judge by tags, hidden when not include bbox
-        if 'cam' in props.motions:
-            apply_icon = 'CAMERA_DATA'
+        (
+            row.operator("mocap.bbox", icon="SHADING_BBOX")
+            if "cam" not in props.motions
+            else None
+        )  # TODO: judge by tags, hidden when not include bbox
+        if "cam" in props.motions:
+            apply_icon = "CAMERA_DATA"
         elif context.selected_objects:
-            apply_icon = 'ARMATURE_DATA'
+            apply_icon = "ARMATURE_DATA"
         else:
-            apply_icon = 'OUTLINER_OB_ARMATURE'
-        apply_text = 'Apply' if context.selected_objects else 'Add'
-        row.operator('mocap.apply', icon=apply_icon, text=apply_text)
-        row.prop(props, 'is_import', icon='EVENT_ONEKEY', text='')
+            apply_icon = "OUTLINER_OB_ARMATURE"
+        apply_text = "Apply" if context.selected_objects else "Add"
+        row.operator("mocap.apply", icon=apply_icon, text=apply_text)
+        row.prop(props, "is_import", icon="EVENT_ONEKEY", text="")
 
 
 class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
-    bl_label = 'Tweak'
+    bl_label = "Tweak"
     bl_parent_id = BL_ID
-    bl_translation_context = 'Operator'
+    bl_translation_context = "Operator"
 
     def draw(self, context):
         layout = Layout(self)
@@ -102,17 +153,17 @@ class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
         col = layout.column()
 
         row = col.row(align=True)
-        row.prop(props, 'base_frame')
+        row.prop(props, "base_frame")
 
         _col = col.column(align=True)
         row = _col.row(align=True)
-        row.prop(props, 'mapping', icon='OUTLINER_OB_ARMATURE', text='')
-        row.operator('mocap.add_mapping', icon='ADD', text='')
-        row.operator('wm.open_dir_mapping', icon='FILE_FOLDER', text='')
+        row.prop(props, "mapping", icon="OUTLINER_OB_ARMATURE", text="")
+        row.operator("mocap.add_mapping", icon="ADD", text="")
+        row.operator("wm.open_dir_mapping", icon="FILE_FOLDER", text="")
         # _col.operator('armature.a_to_t_pose', text='A-pose to T-pose')
         _row = _col.row(align=True)
-        _row.operator('mocap.fk_to_ik', icon='GROUP_BONE', text='FK to IK')
-        _row.prop(props, 'is_fk_to_ik', icon='EVENT_TWOKEY', text='')
+        _row.operator("mocap.fk_to_ik", icon="GROUP_BONE", text="FK to IK")
+        _row.prop(props, "is_fk_to_ik", icon="EVENT_TWOKEY", text="")
 
         _col_ = col.column(align=True)
         row = _col_.row()
@@ -120,16 +171,16 @@ class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
         is_clean = props.clean_th > 0
         is_dec = props.decimate_th > 0
         _row = _col.row(align=True)
-        _row.prop(props, 'clean_th', icon='HANDLETYPE_AUTO_CLAMP_VEC')
-        _row.prop(props, 'keep_end', icon='NEXT_KEYFRAME', text='')
+        _row.prop(props, "clean_th", icon="HANDLETYPE_AUTO_CLAMP_VEC")
+        _row.prop(props, "keep_end", icon="NEXT_KEYFRAME", text="")
         _row.active = is_clean
         _row = row.row()
-        _row.prop(props, 'decimate_th', icon='HANDLETYPE_ALIGNED_VEC')
+        _row.prop(props, "decimate_th", icon="HANDLETYPE_ALIGNED_VEC")
         _row.active = is_dec
 
         _row = _col_.row(align=True)
-        _row.operator('mocap.decimate', icon='MOD_DECIM', text='Decimate Curve')
-        _row.prop(props, 'is_decimate', icon='EVENT_THREEKEY', text='')
+        _row.operator("mocap.decimate", icon="MOD_DECIM", text="Decimate Curve")
+        _row.prop(props, "is_decimate", icon="EVENT_THREEKEY", text="")
         _row.active = is_dec or is_clean
 
         # row = col.row(align=True)
@@ -138,7 +189,7 @@ class TWEAK_PT_Panel(DefaultPanel, bpy.types.Panel):
 
 
 class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
-    bl_label = 'Development'
+    bl_label = "Debug"
     bl_parent_id = BL_ID
     state = 0
 
@@ -146,15 +197,15 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
         layout = Layout(self)
         props = Props(context)
         col = layout.column()
-        col.operator('armature.get_bones_info', icon='BONE_DATA')
-        col.operator('mocap.fit_bbox', icon='CUBE', text='Fit Bbox')
+        col.operator("armature.get_bones_info", icon="BONE_DATA")
+        col.operator("mocap.fit_bbox", icon="CUBE", text="Fit Bbox")
         # col.operator('mocap.export', icon='EXPORT', text='Export')
         row = col.row(align=True)
-        row.operator('mocap.start_timer', icon='TIME')
-        row.operator('mocap.pause', icon='PAUSE')
-        row.operator('mocap.continue', icon='PLAY')
-        row.operator('mocap.cancel', icon='CANCEL')
-        col.prop(props, 'debug_kwargs', text='')
+        row.operator("mocap.start_timer", icon="TIME")
+        row.operator("mocap.pause", icon="PAUSE")
+        row.operator("mocap.continue", icon="PLAY")
+        row.operator("mocap.cancel", icon="CANCEL")
+        col.prop(props, "debug_kwargs", text="")
         # col.prop(props, 'debug_eval', icon='CONSOLE', text='')
 
         cls = self.__class__
@@ -175,19 +226,27 @@ class DEBUG_PT_Panel(DefaultPanel, bpy.types.Panel):
 
 
 class Operator:
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def f1_help(cls):
+        """https://blender.stackexchange.com/questions/91377/adding-a-documentation-reference-for-a-custom-object-attribute"""
+        bl_idname = getattr(cls, "bl_idname", "")  # 获取子类的 bl_idname 属性
+        map = ((BPY_OPS + bl_idname, ""),)
+        return F1_HELP, map
 
 
 class TimerOperator(Operator, bpy.types.Operator):
+    """Setup timer for Progress"""
+
     bl_idname = "mocap.start_timer"
     bl_label = "Timer"
-    bl_description = "Setup timer for Progress"
     timer = None
 
     def modal(self, context, event):
-        if not Progress.PAUSE() and (event.type == 'ESC' or event.type == 'PAUSE'):
+        if not Progress.PAUSE() and (event.type == "ESC" or event.type == "PAUSE"):
             Progress.PAUSE(True)
-        if event.type == 'TIMER':
+        if event.type == "TIMER":
             try:
                 ret = gen_calc()
             except Exception as e:
@@ -195,97 +254,109 @@ class TimerOperator(Operator, bpy.types.Operator):
                 raise e
             if ret:
                 self.cancel(context)
-                return {'FINISHED'}
-        return {'PASS_THROUGH'}
+                return {"FINISHED"}
+        return {"PASS_THROUGH"}
 
     @execute
     def execute(self, context):
         if TimerOperator.timer:
-            Log.warning(f'Timer already running:\n{id(TimerOperator.timer)=}')
-            return {'FINISHED'}
+            Log.warning(f"Timer already running:\n{id(TimerOperator.timer)=}")
+            return {"FINISHED"}
         wm = context.window_manager
-        TimerOperator.timer = wm.event_timer_add(Progress.update_interval, window=context.window)
+        if not wm:
+            return {"CANCELLED"}
+        TimerOperator.timer = wm.event_timer_add(
+            Progress.update_interval, window=context.window
+        )
         wm.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
+        return {"RUNNING_MODAL"}
 
-    def cancel(self: 'TimerOperator|None' = None, context=None):
-        Log.debug(f'cancel {id(TimerOperator.timer)=} {len(GEN.queue)=} {len(Progress.selves)=}')
+    def cancel(self: "TimerOperator|None" = None, context=None):
+        Log.debug(
+            f"cancel {id(TimerOperator.timer)=} {len(GEN.queue)=} {len(Progress.selves)=}"
+        )
         if TimerOperator.timer:
             context.window_manager.event_timer_remove(TimerOperator.timer)
             TimerOperator.timer = None
             GEN.queue.clear()
         Progress.selves.clear()
         GEN.clear()
-        return {'CANCELLED'}
+        return {"CANCELLED"}
 
 
 class PauseOperator(Operator, bpy.types.Operator):
+    """⏸️"""
+
     bl_idname = "mocap.pause"
     bl_label = "Pause"
-    bl_description = "暂停"
 
     def execute(self, context):
         Progress.PAUSE(True)
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class ContinueOperator(Operator, bpy.types.Operator):
+    """继续"""
+
     bl_idname = "mocap.continue"
     bl_label = "Continue"
-    bl_description = "继续"
 
     def execute(self, context):
         Progress.PAUSE(False)
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class CancelOperator(Operator, bpy.types.Operator):
+    """取消"""
+
     bl_idname = "mocap.cancel"
     bl_label = "Cancel"
-    bl_description = "取消"
 
     def execute(self, context):
         TimerOperator.cancel(context=context)
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class ApplyMocap_Operator(Operator, bpy.types.Operator):
-    bl_idname = 'mocap.apply'
-    bl_label = 'Apply'
-    bl_description = 'Apply selected mocap data from npz file.'
+    """Apply selected mocap data from npz file."""
+
+    bl_idname = "mocap.apply"
+    bl_label = "Apply"
 
     @execute
     def execute(self, context):
         props = Props(context)
         apply(props.motions, **ui_to_b_kwargs(props))
         bpy.ops.mocap.start_timer()  # type: ignore
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class Bbox_Operator(Operator, bpy.types.Operator):
-    bl_idname = 'mocap.bbox'
-    bl_label = 'Boundary'  # TODO 'Bounding Box' is not translated
-    bl_translation_context = 'Brush'
-    bl_description = 'see bbox from npz file.'
+    """see bbox from npz file."""
+
+    bl_idname = "mocap.bbox"
+    bl_label = "Boundary"  # TODO 'Bounding Box' is not translated
+    bl_translation_context = "Brush"
 
     @execute
     def execute(self, context):
         props = Props(context)
         bbox(props.motions, **ui_to_b_kwargs(props))
         bpy.ops.mocap.start_timer()  # type: ignore
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class LoadFile_Operator(Operator, bpy.types.Operator, ImportHelper):
-    bl_idname = 'mocap.load_file'
-    bl_label = 'Load'
-    bl_description = 'gvhmr/wilor ouput .npz file, generated from mocap_wrapper; or video like .mp4'
-    bl_options = {'REGISTER'}
+    """gvhmr/wilor ouput .npz file, generated from mocap_wrapper; or video like .mp4"""
+
+    bl_idname = "mocap.load_file"
+    bl_label = "Load"
+    bl_options = {"REGISTER"}
 
     filter_glob: bpy.props.StringProperty(
-        default='*.npz;*.' + ';*.'.join(VIDEO_EXT),
-        options={'HIDDEN'},
-    )   # type: ignore
+        default="*.npz;*." + ";*.".join(VIDEO_EXT),
+        options={"HIDDEN"},
+    )  # type: ignore
 
     def invoke(self, context, event):
         props = Props(context)
@@ -294,70 +365,77 @@ class LoadFile_Operator(Operator, bpy.types.Operator, ImportHelper):
 
     def execute(self, context):
         props = Props(context)
-        props.input_file = self.filepath  # Update props.input_file with the selected file path
-        return {'FINISHED'}
+        props.input_file = (
+            self.filepath
+        )  # Update props.input_file with the selected file path
+        return {"FINISHED"}
 
 
 class OpenMapping_Operator(Operator, bpy.types.Operator):
-    bl_idname = 'wm.open_dir_mapping'
-    bl_label = 'Open Folder'
-    bl_description = 'Open mapping folder'
+    """Open mapping folder"""
+
+    bl_idname = "wm.open_dir_mapping"
+    bl_label = "Open Folder"
 
     @execute
     def execute(self, context):
         bpy.ops.wm.path_open(filepath=DIR_MAPPING)
         items_mapping.cache_clear()
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class AddMapping_Operator(Operator, bpy.types.Operator):
-    bl_idname = 'mocap.add_mapping'
-    bl_label = 'Add Mapping'
-    bl_description = 'Add mapping based on selected armature'
-    bl_options = {'REGISTER'}
+    """Add mapping based on selected armature"""
+
+    bl_idname = "mocap.add_mapping"
+    bl_label = "Add Mapping"
+    bl_options = {"REGISTER"}
 
     @execute
     def execute(self, context):
         try:
             add_mapping()
         except FileExistsError:
-            bpy.ops.wm.open_dir_mapping()   # type: ignore
+            bpy.ops.wm.open_dir_mapping()  # type: ignore
             raise
         items_mapping.cache_clear()
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class FK_to_IK_Operator(Operator, bpy.types.Operator):
-    bl_idname = 'mocap.fk_to_ik'
-    bl_label = 'FK to IK'
-    bl_description = 'FK to IK, then append the IK bones to current armature'
+    """FK to IK, then append the IK bones to current armature"""
+
+    bl_idname = "mocap.fk_to_ik"
+    bl_label = "FK to IK"
 
     @execute
     def execute(self, context):
         FKtoIK()
         bpy.ops.mocap.start_timer()  # type: ignore
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class Decimate_Operator(Operator, bpy.types.Operator):
-    bl_idname = 'mocap.decimate'
-    bl_label = 'Decimate Curve'
-    bl_description = 'Simplify F-Curves by removing closely spaced keyframes'
-    bl_translation_context = 'Operator'
+    """Simplify F-Curves by removing closely spaced keyframes"""
+
+    bl_idname = "mocap.decimate"
+    bl_label = "Decimate Curve"
+    bl_translation_context = "Operator"
 
     @execute
     def execute(self, context):
         props = Props(context)
         GEN.append(gen_decimate(**ui_to_b_kwargs(props)))
         bpy.ops.mocap.start_timer()  # type: ignore
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class TaskQueue_Operator(Operator, bpy.types.Operator):
-    bl_idname = 'mocap.start_task_queue'
-    bl_label = 'Begin'
-    bl_description = 'Start the task queue for processing mocap data'
-    bl_translation_context = 'WindowManager'
+    """Start the task queue for processing mocap data"""
+
+    bl_idname = "mocap.start_task_queue"
+    bl_label = "Begin"
+    bl_translation_context = "WindowManager"
 
     @execute
     def execute(self, context):
@@ -366,65 +444,69 @@ class TaskQueue_Operator(Operator, bpy.types.Operator):
         FKtoIK() if props.is_fk_to_ik else None
         GEN.append(gen_decimate(**ui_to_b_kwargs(props))) if props.is_decimate else None
         bpy.ops.mocap.start_timer()  # type: ignore
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class GetBonesInfo_Operator(Operator, bpy.types.Operator):
-    bl_idname = 'armature.get_bones_info'
-    bl_label = 'print bones'
-    bl_description = 'print bones info for making mapping or debugging'
-    bl_options = {'REGISTER'}
+    """print bones info for making mapping or debugging"""
+
+    bl_idname = "armature.get_bones_info"
+    bl_label = "print bones"
+    bl_options = {"REGISTER"}
 
     @execute
     def execute(self, context):
         s = get_bones_info()
-        Log.info(s, extra={'mouse': False})
-        return {'FINISHED'}
+        Log.info(s, extra={"mouse": False})
+        return {"FINISHED"}
 
 
 class FitBbox_Operator(Operator, bpy.types.Operator):
-    bl_idname = 'mocap.fit_bbox'
-    bl_label = 'Fit Bbox'
-    bl_description = 'Fit the selected object to the bounding box of the target object'
+    """Fit the selected object to the bounding box of the target object"""
+
+    bl_idname = "mocap.fit_bbox"
+    bl_label = "Fit Bbox"
 
     @execute
     def execute(self, context):
         # get the selected objects
         objs = get_active_selected_objs(context.selected_objects)
         if len(objs) != 2 or objs[0] not in objs:
-            raise ValueError('Please select exactly two objects: the one to fit and the target object.')
+            raise ValueError(
+                "Please select exactly two objects: the one to fit and the target object."
+            )
         with fit_bbox(need_fit=objs[1], target=objs[0], restore=False):
             ...
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class Mocap_PropsGroup(bpy.types.PropertyGroup):
     input_file: bpy.props.StringProperty(
-        name='Input',
-        description=LoadFile_Operator.bl_description,
-        default='mocap_*.npz',
+        name="Input",
+        description=LoadFile_Operator.__doc__,
+        default="mocap_*.npz",
         # subtype='FILE_PATH',
         update=load_data,
     )  # type: ignore
     motions: bpy.props.EnumProperty(
-        name='Action',
-        description='load which motion action',
+        name="Action",
+        description="load which motion action",
         items=lambda self, context: items_motions(self, context),
         # options={'ENUM_FLAG'}
     )  # type: ignore
     keep_end: bpy.props.BoolProperty(
-        name='End Frame',
-        description='Keep last frame at -1 as start frame when clean up keyframes curves',
+        name="End Frame",
+        description="Keep last frame at -1 as start frame when clean up keyframes curves",
         default=True,
     )  # type: ignore
     mapping: bpy.props.EnumProperty(
-        name='Mapping',
-        description='re-mapping to which bones struct',
+        name="Mapping",
+        description="re-mapping to which bones struct",
         items=lambda self, context: items_mapping(self, context),
     )  # type: ignore
     base_frame: bpy.props.IntProperty(
-        name='Frame',
-        description='could set -1(last) or 0(first) frame as origin location/rotation for offset calculation',
+        name="Frame",
+        description="could set -1(last) or 0(first) frame as origin location/rotation for offset calculation",
         # subtype='FACTOR',
         default=0,
         soft_min=-1,
@@ -432,10 +514,10 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         step=1,
     )  # type: ignore
     clean_th: bpy.props.FloatProperty(
-        name='Cleanup',
-        description='Simplify F-Curves by removing closely spaced keyframes',
-        translation_context='Operator',
-        subtype='FACTOR',
+        name="Cleanup",
+        description="Simplify F-Curves by removing closely spaced keyframes",
+        translation_context="Operator",
+        subtype="FACTOR",
         default=0,
         max=1,
         soft_min=0,
@@ -444,10 +526,10 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         precision=3,
     )  # type: ignore
     decimate_th: bpy.props.FloatProperty(
-        name='Decimate (Allowed Change)',
-        translation_context='Operator',
-        description='How much the new decimated curve is allowed to deviate from the original',
-        subtype='FACTOR',
+        name="Decimate (Allowed Change)",
+        translation_context="Operator",
+        description="How much the new decimated curve is allowed to deviate from the original",
+        subtype="FACTOR",
         default=0.03,  # 0.01
         max=1,
         soft_min=0,
@@ -456,32 +538,32 @@ class Mocap_PropsGroup(bpy.types.PropertyGroup):
         precision=3,
     )  # type: ignore
     debug_kwargs: bpy.props.StringProperty(
-        name='Arguments',
-        description='kwargs for debug',
+        name="Arguments",
+        description="kwargs for debug",
         default="rot=0",
-    )   # type: ignore
+    )  # type: ignore
     is_import: bpy.props.BoolProperty(
-        name='①',
-        description='Enable `Import/Apply` in Task queue',
+        name="①",
+        description="Enable `Import/Apply` in Task queue",
         default=True,
     )  # type: ignore
     is_fk_to_ik: bpy.props.BoolProperty(
-        name='②',
-        description='Enable `IK to FK` conversion in Task queue',
+        name="②",
+        description="Enable `IK to FK` conversion in Task queue",
         default=True,
     )  # type: ignore
     is_decimate: bpy.props.BoolProperty(
-        name='③',
-        description='Enable `Decimate` in Task queue',
+        name="③",
+        description="Enable `Decimate` in Task queue",
         default=True,
     )  # type: ignore
     is_post_process: bpy.props.BoolProperty(
-        name='④',
-        description='Enable `Post Process` in Task queue',
+        name="④",
+        description="Enable `Post Process` in Task queue",
         default=False,
     )  # type: ignore
     post_process: bpy.props.StringProperty(
-        name='Post Process',
-        description='Post process after finishing Task queue',
+        name="Post Process",
+        description="Post process after finishing Task queue",
         default=_EXPORT_PY,
     )  # type: ignore

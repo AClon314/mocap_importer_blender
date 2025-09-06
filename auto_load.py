@@ -28,7 +28,11 @@ def init():
 def register():
     for cls in ordered_classes:
         bpy.utils.register_class(cls)
-
+        if hasattr(cls, "f1_help"):
+            if isinstance(cls.f1_help, typing.Callable):
+                bpy.utils.register_manual_map(cls.f1_help)
+            else:
+                print(f"f1_help of {cls} is not callable")
     for module in modules:
         if module.__name__ == __name__:
             continue
@@ -39,6 +43,8 @@ def register():
 def unregister():
     for cls in reversed(ordered_classes):
         bpy.utils.unregister_class(cls)
+        if hasattr(cls, "f1_help") and isinstance(cls.f1_help, typing.Callable):
+            bpy.utils.unregister_manual_map(cls.f1_help)
 
     for module in modules:
         if module.__name__ == __name__:
